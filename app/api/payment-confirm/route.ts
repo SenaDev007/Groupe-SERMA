@@ -3,7 +3,7 @@ import { Resend } from "resend";
 import { fullFormSchema } from "@/lib/validations";
 import { generateEmailHTML } from "@/lib/email-template";
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+const resend = new Resend(process.env.RESEND_API_KEY || "re_123456789");
 
 export async function POST(req: NextRequest) {
   try {
