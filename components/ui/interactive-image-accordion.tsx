@@ -9,27 +9,27 @@ const accordionItems = [
   {
     id: 1,
     title: 'Audit & Commissariat aux Comptes',
-    imageUrl: 'https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?q=80&w=600&auto=format&fit=crop',
+    imageUrl: '/images/serma_audit.png',
   },
   {
     id: 2,
     title: 'Gestion de la Caisse en Entreprise',
-    imageUrl: 'https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?q=80&w=600&auto=format&fit=crop',
+    imageUrl: '/images/serma_caisse.png',
   },
   {
     id: 3,
     title: 'Conseil Fiscal & Social',
-    imageUrl: 'https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?q=80&w=600&auto=format&fit=crop',
+    imageUrl: '/images/serma_fiscal.png',
   },
   {
     id: 4,
     title: 'Gestion de Projet Agile',
-    imageUrl: 'https://images.unsplash.com/photo-1531403009284-440f080d1e12?q=80&w=600&auto=format&fit=crop',
+    imageUrl: '/images/serma_projet.png',
   },
   {
     id: 5,
     title: 'Comptabilité Pratique Perfecto',
-    imageUrl: 'https://images.unsplash.com/photo-1507537297725-24a1c029d3ca?q=80&w=600&auto=format&fit=crop',
+    imageUrl: '/images/serma_perfecto.png',
   },
 ];
 
