@@ -18,7 +18,7 @@ export default function Footer() {
               Une alliance unique d'expertise comptable et de formation pratique.
             </p>
             <p className="text-slate-500 text-xs">
-              📍 Zongo 2, axe BENI CHIC – PRESIDO, Parakou, Bénin
+              Adresse : Zongo 2, axe BENI CHIC – PRESIDO, Parakou, Bénin
             </p>
           </div>
 
@@ -113,9 +113,9 @@ export default function Footer() {
         {/* Middle Line - Contact details bar */}
         <div className="border-t border-white/[0.05] py-6 flex flex-col sm:flex-row justify-between items-center gap-4 text-xs text-slate-400">
           <div className="flex flex-wrap justify-center sm:justify-start gap-6 font-medium">
-            <span>📞 Direct : <a href="tel:+2290196237343" className="text-white hover:text-orange-logo transition-colors">+229 01 96 23 73 43</a></span>
-            <span>💬 WhatsApp : <a href="https://wa.me/2290140377199" target="_blank" rel="noopener noreferrer" className="text-white hover:text-orange-logo transition-colors">+229 01 40 37 71 99</a></span>
-            <span>✉️ E-mail : <a href="mailto:contact@sermagroupe.bj" className="text-white hover:text-orange-logo transition-colors">contact@sermagroupe.bj</a></span>
+            <span>Direct : <a href="tel:+2290196237343" className="text-white hover:text-orange-logo transition-colors">+229 01 96 23 73 43</a></span>
+            <span>WhatsApp : <a href="https://wa.me/2290140377199" target="_blank" rel="noopener noreferrer" className="text-white hover:text-orange-logo transition-colors">+229 01 40 37 71 99</a></span>
+            <span>E-mail : <a href="mailto:contact@sermagroupe.bj" className="text-white hover:text-orange-logo transition-colors">contact@sermagroupe.bj</a></span>
           </div>
         </div>
 

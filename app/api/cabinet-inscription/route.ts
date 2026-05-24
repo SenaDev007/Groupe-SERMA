@@ -54,7 +54,7 @@ export async function POST(req: NextRequest) {
             <table cellpadding="0" cellspacing="0" style="background:rgba(43,169,107,0.1);border:1px solid rgba(43,169,107,0.3);border-radius:10px;padding:10px 16px;">
               <tr>
                 <td style="font-size:12px;color:#2BA96B;font-weight:600;">
-                  ✅ &nbsp;${data.prenom} ${data.nom} vient de s'inscrire à la formation Cabinet SERMA
+                  [Notification] ${data.prenom} ${data.nom} vient de s'inscrire à la formation Cabinet SERMA
                 </td>
               </tr>
             </table>
@@ -151,7 +151,7 @@ export async function POST(req: NextRequest) {
         const { error: sendError } = await resend.emails.send({
           from: "SERMA HUB Impact Academy <noreply@academiahelm.com>",
           to: [toEmail],
-          subject: `📋 Inscription Cabinet SERMA — ${data.prenom} ${data.nom}`,
+          subject: `[Cabinet SERMA] Inscription — ${data.prenom} ${data.nom}`,
           html,
           reply_to: data.email,
         });

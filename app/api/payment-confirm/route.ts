@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
         const { data: sendData, error: sendError } = await resend.emails.send({
           from: "SERMA HUB Impact Academy <noreply@academiahelm.com>",
           to: [toEmail],
-          subject: `✅ Paiement confirmé — ${data.prenom} ${data.nom}`,
+          subject: `[SERMA HUB] Inscription & Paiement Confirmés — ${data.prenom} ${data.nom}`,
           html,
           reply_to: data.email,
         });

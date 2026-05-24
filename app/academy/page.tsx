@@ -35,7 +35,7 @@ export default function AcademyPage() {
           <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-vert-tech/15 border border-vert-tech/35 mb-6">
             <span className="w-2 h-2 rounded-full bg-vert-tech animate-pulse" />
             <span className="text-vert-tech text-xs font-semibold uppercase tracking-wider">
-              🟢 Inscriptions ouvertes — Places limitées à 10
+              Inscriptions ouvertes — Places limitées à 10
             </span>
           </div>
           

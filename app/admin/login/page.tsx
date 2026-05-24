@@ -4,7 +4,7 @@
 
 import React, { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ShieldCheck, Lock, User, Eye, EyeOff, Loader2 } from "lucide-react";
+import { ShieldCheck, Lock, User, Eye, EyeOff, Loader2, AlertCircle } from "lucide-react";
 
 function LoginForm() {
   const router = useRouter();
@@ -112,8 +112,9 @@ function LoginForm() {
           </div>
 
           {error && (
-            <div className="mb-6 p-4 bg-red-500/10 border border-red-500/20 text-red-400 rounded-xl text-sm font-medium">
-              ⚠️ {error}
+            <div className="mb-6 p-4 bg-red-500/10 border border-red-500/20 text-red-400 rounded-xl text-sm font-medium flex items-center gap-2">
+              <AlertCircle className="h-4 w-4 shrink-0" />
+              <span>{error}</span>
             </div>
           )}
 

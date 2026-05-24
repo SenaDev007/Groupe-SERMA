@@ -141,7 +141,7 @@ export async function POST(
         await resend.emails.send({
           from: "SERMA HUB Custom Forms <noreply@academiahelm.com>",
           to: [toEmail],
-          subject: `📋 Formulaire ${entityLabel} : ${form.title}`,
+          subject: `[SERMA HUB] Formulaire ${entityLabel} : ${form.title}`,
           html,
           ...(replyToEmail ? { reply_to: replyToEmail } : {}),
         });

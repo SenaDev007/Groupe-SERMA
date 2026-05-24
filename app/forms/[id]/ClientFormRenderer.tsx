@@ -5,7 +5,7 @@
 import React, { useState, useEffect } from "react";
 import { Form } from "@/lib/db";
 import { motion } from "framer-motion";
-import { Check, ArrowRight, Loader2, CreditCard, Sparkles } from "lucide-react";
+import { Check, ArrowRight, Loader2, CreditCard, Sparkles, AlertCircle } from "lucide-react";
 import confetti from "canvas-confetti";
 
 interface ClientFormRendererProps {
@@ -243,8 +243,9 @@ export default function ClientFormRenderer({ form }: ClientFormRendererProps) {
       </div>
 
       {submitError && (
-        <div className="mb-6 p-4 bg-red-500/10 border border-red-500/25 text-red-400 rounded-xl text-xs font-semibold">
-          ⚠️ {submitError}
+        <div className="mb-6 p-4 bg-red-500/10 border border-red-500/25 text-red-400 rounded-xl text-xs font-semibold flex items-center gap-2">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          <span>{submitError}</span>
         </div>
       )}
 

@@ -120,7 +120,7 @@ export async function POST(req: NextRequest) {
         const { error: sendError } = await resend.emails.send({
           from: "Cabinet SERMA SARL <noreply@academiahelm.com>", // Make sure sending domain is verified on Resend
           to: [toEmail],
-          subject: `🔵 Nouveau lead B2B — ${data.besoin} — ${data.raisonSociale}`,
+          subject: `[Cabinet SERMA B2B] Nouveau lead — ${data.besoin} — ${data.raisonSociale}`,
           html,
           reply_to: data.email,
         });
