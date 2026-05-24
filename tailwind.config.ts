@@ -17,6 +17,37 @@ const config: Config = {
     },
     extend: {
       colors: {
+        // Shadcn UI mapped tokens matching Groupe SERMA palette
+        border: "rgba(255, 255, 255, 0.08)",
+        input: "rgba(255, 255, 255, 0.1)",
+        ring: "#E07F0A",
+        background: "#05091a",
+        foreground: "#ffffff",
+        primary: {
+          DEFAULT: "#E07F0A", // Orange logo
+          foreground: "#ffffff",
+        },
+        secondary: {
+          DEFAULT: "#112046", // Marine moyen
+          foreground: "#ffffff",
+        },
+        destructive: {
+          DEFAULT: "#ef4444",
+          foreground: "#ffffff",
+        },
+        accent: {
+          DEFAULT: "rgba(255, 255, 255, 0.06)",
+          foreground: "#ffffff",
+        },
+        popover: {
+          DEFAULT: "#0b1527",
+          foreground: "#ffffff",
+        },
+        card: {
+          DEFAULT: "#0b1527",
+          foreground: "#ffffff",
+        },
+
         // Original names for form compatibility
         navy: {
           DEFAULT: "#0C193D", // Marine profond
