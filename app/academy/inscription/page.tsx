@@ -1,5 +1,5 @@
-import Navbar from "@/components/layout/Navbar";
-import Footer from "@/components/layout/Footer";
+import { Header } from "@/components/ui/header-2";
+import Footer4Col from "@/components/ui/footer-column";
 import MultiStepForm from "@/components/MultiStepForm";
 import WhatsAppFAB from "@/components/shared/WhatsAppFAB";
 import { BookOpen, CalendarDays, Clock3, BadgeCheck, Users, MapPin, Phone } from "lucide-react";
@@ -39,7 +39,7 @@ const STATS_CARDS = [
 export default function InscriptionPage() {
   return (
     <>
-      <Navbar />
+      <Header />
 
       <main className="min-h-screen bg-navy bg-hero-gradient text-slate-300 pt-28 pb-20">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -151,7 +151,7 @@ export default function InscriptionPage() {
       </main>
 
       <WhatsAppFAB />
-      <Footer />
+      <Footer4Col />
     </>
   );
 }

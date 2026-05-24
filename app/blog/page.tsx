@@ -1,5 +1,5 @@
-import Navbar from "@/components/layout/Navbar";
-import Footer from "@/components/layout/Footer";
+import { Header } from "@/components/ui/header-2";
+import Footer4Col from "@/components/ui/footer-column";
 import WhatsAppFAB from "@/components/shared/WhatsAppFAB";
 import { ArrowRight, BookOpen, Clock, Calendar } from "lucide-react";
 import Link from "next/link";
@@ -51,7 +51,7 @@ const POSTS = [
 export default function BlogPage() {
   return (
     <>
-      <Navbar />
+      <Header />
 
       <main className="min-h-screen bg-slate-50 text-marine-profond pt-28 pb-20">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -153,7 +153,7 @@ export default function BlogPage() {
       </main>
 
       <WhatsAppFAB />
-      <Footer />
+      <Footer4Col />
     </>
   );
 }

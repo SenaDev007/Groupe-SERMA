@@ -1,5 +1,6 @@
-import Navbar from "@/components/layout/Navbar";
-import Footer from "@/components/layout/Footer";
+import { Header } from "@/components/ui/header-2";
+import Footer4Col from "@/components/ui/footer-column";
+import { LandingAccordionItem } from "@/components/ui/interactive-image-accordion";
 import StatsCounter from "@/components/shared/StatsCounter";
 import TestimonialCard from "@/components/shared/TestimonialCard";
 import WhatsAppFAB from "@/components/shared/WhatsAppFAB";
@@ -9,7 +10,7 @@ import { ArrowRight, Scale, GraduationCap, ShieldCheck, MapPin, Phone, MessageSq
 export default function HomePage() {
   return (
     <>
-      <Navbar />
+      <Header />
       
       {/* ── HERO SECTION ── */}
       <section className="relative min-h-screen flex items-center justify-center pt-24 pb-16 overflow-hidden bg-marine-profond">
@@ -152,6 +153,8 @@ export default function HomePage() {
         </div>
       </section>
 
+      <LandingAccordionItem />
+
       {/* ── POURQUOI SERMA ── */}
       <section id="pourquoi" className="py-20 bg-marine-profond text-white relative">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -289,7 +292,7 @@ export default function HomePage() {
       </section>
 
       <WhatsAppFAB />
-      <Footer />
+      <Footer4Col />
     </>
   );
 }

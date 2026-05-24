@@ -1,5 +1,5 @@
-import Navbar from "@/components/layout/Navbar";
-import Footer from "@/components/layout/Footer";
+import { Header } from "@/components/ui/header-2";
+import Footer4Col from "@/components/ui/footer-column";
 import TestimonialCard from "@/components/shared/TestimonialCard";
 import ContactCabinet from "@/components/cabinet/ContactCabinet";
 import WhatsAppFAB from "@/components/shared/WhatsAppFAB";
@@ -21,7 +21,7 @@ export const metadata: Metadata = {
 export default function CabinetPage() {
   return (
     <>
-      <Navbar />
+      <Header />
 
       {/* ── HERO SECTION ── */}
       <section className="relative min-h-[85vh] flex items-center justify-center pt-28 pb-20 bg-marine-profond">
@@ -399,7 +399,7 @@ export default function CabinetPage() {
       </section>
 
       <WhatsAppFAB />
-      <Footer />
+      <Footer4Col />
     </>
   );
 }
