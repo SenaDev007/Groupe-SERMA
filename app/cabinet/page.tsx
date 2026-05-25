@@ -25,11 +25,21 @@ export default function CabinetPage() {
 
       {/* ── HERO SECTION ── */}
       <section className="relative min-h-[85vh] flex items-center justify-center pt-28 pb-20 bg-marine-profond">
+        {/* Background Image Texture */}
+        <div className="absolute inset-0 pointer-events-none z-0 opacity-15">
+          <img
+            src="/images/hero_background.png"
+            alt="Hero Background"
+            className="w-full h-full object-cover"
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-marine-profond via-transparent to-transparent" />
+        </div>
+
         {/* Background Overlay */}
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-marine-moyen via-marine-profond to-marine-profond opacity-90 z-0" />
-        <div className="absolute inset-0 pointer-events-none bg-grid-pattern opacity-5 z-0" />
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-marine-moyen via-marine-profond to-marine-profond opacity-90 z-10" />
+        <div className="absolute inset-0 pointer-events-none bg-grid-pattern opacity-5 z-10" />
         
-        <div className="relative z-10 max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+        <div className="relative z-20 max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
           <span className="inline-block text-orange-logo font-mono text-xs uppercase tracking-widest font-bold px-3 py-1.5 rounded-full bg-orange-logo/10 border border-orange-logo/25 mb-6">
             CABINET SERMA SARL — Expertise & Conseil
           </span>

@@ -14,13 +14,23 @@ export default function HomePage() {
       
       {/* ── HERO SECTION ── */}
       <section className="relative min-h-screen flex items-center justify-center pt-24 pb-16 overflow-hidden bg-marine-profond">
+        {/* Background Image Texture */}
+        <div className="absolute inset-0 pointer-events-none z-0 opacity-20">
+          <img
+            src="/images/hero_background.png"
+            alt="Hero Background"
+            className="w-full h-full object-cover"
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-marine-profond via-transparent to-transparent" />
+        </div>
+
         {/* Ambient background decoration */}
-        <div className="absolute inset-0 pointer-events-none overflow-hidden">
+        <div className="absolute inset-0 pointer-events-none overflow-hidden z-10">
           <div className="absolute -top-40 -right-40 w-96 h-96 rounded-full bg-orange-logo/10 blur-3xl animate-pulse" />
           <div className="absolute -bottom-40 -left-40 w-96 h-96 rounded-full bg-vert-tech/5 blur-3xl" />
         </div>
         
-        <div className="relative z-10 max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+        <div className="relative z-20 max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
           <span className="inline-block text-orange-logo font-mono text-xs uppercase tracking-widest font-bold px-3 py-1.5 rounded-full bg-orange-logo/10 border border-orange-logo/25 mb-6">
             GROUPE SERMA — Parakou, Bénin
           </span>

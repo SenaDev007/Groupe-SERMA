@@ -25,13 +25,23 @@ export default function AcademyPage() {
 
       {/* ── HERO SECTION ── */}
       <section className="relative min-h-[90vh] flex items-center justify-center pt-28 pb-20 bg-marine-profond text-white">
+        {/* Background Image Texture */}
+        <div className="absolute inset-0 pointer-events-none z-0 opacity-20">
+          <img
+            src="/images/hero_background.png"
+            alt="Hero Background"
+            className="w-full h-full object-cover"
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-marine-profond via-transparent to-transparent" />
+        </div>
+
         {/* Animated backdrop decoration */}
-        <div className="absolute inset-0 pointer-events-none overflow-hidden">
+        <div className="absolute inset-0 pointer-events-none overflow-hidden z-10">
           <div className="absolute top-1/4 left-1/4 w-96 h-96 rounded-full bg-orange-logo/10 blur-3xl animate-pulse" />
           <div className="absolute bottom-1/4 right-1/4 w-96 h-96 rounded-full bg-vert-tech/10 blur-3xl" />
         </div>
 
-        <div className="relative z-10 max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+        <div className="relative z-20 max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
           <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-vert-tech/15 border border-vert-tech/35 mb-6">
             <span className="w-2 h-2 rounded-full bg-vert-tech animate-pulse" />
             <span className="text-vert-tech text-xs font-semibold uppercase tracking-wider">
