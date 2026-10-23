@@ -4,7 +4,7 @@ import React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowRight, Menu, X } from "lucide-react";
+import { ArrowRight, Lock, Menu, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /**
@@ -132,6 +132,16 @@ export function Navbar() {
               <ArrowRight className="w-4 h-4 transition-transform duration-200 group-hover:translate-x-1" />
             </Link>
           </motion.div>
+
+          {/* Accès back-office — discret, réservé à l'équipe */}
+          <Link
+            href="/back-office/login"
+            aria-label="Espace collaborateur — accéder au back-office"
+            title="Espace collaborateur"
+            className="inline-flex items-center justify-center w-10 h-10 rounded-full border border-marine-profond/15 text-marine-profond/60 hover:text-marine-profond hover:border-marine-profond/35 hover:bg-gris-bleute transition-colors"
+          >
+            <Lock className="w-4 h-4" aria-hidden />
+          </Link>
         </div>
 
         {/* Bouton menu mobile */}
@@ -178,6 +188,13 @@ export function Navbar() {
               >
                 {ctaText}
                 <ArrowRight className="w-4 h-4" />
+              </Link>
+              <Link
+                href="/back-office/login"
+                className="mt-5 inline-flex items-center justify-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-gris-texte/70 hover:text-marine-profond transition-colors"
+              >
+                <Lock className="w-3.5 h-3.5" aria-hidden />
+                Espace collaborateur
               </Link>
             </div>
           </motion.div>
