@@ -1,0 +1,420 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* ============================================================
+   TOKENS SHADCN/UI — préservés pour les composants UI existants
+   ============================================================ */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-dmsans);
+  --font-mono: var(--font-geist-mono);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+:root {
+  --radius: 0.625rem;
+  --background: #ffffff;
+  --foreground: #0C193D;
+  --card: #ffffff;
+  --card-foreground: #0C193D;
+  --popover: #ffffff;
+  --popover-foreground: #0C193D;
+  --primary: #E07F0A;
+  --primary-foreground: #ffffff;
+  --secondary: #112046;
+  --secondary-foreground: #ffffff;
+  --muted: #F4F6FB;
+  --muted-foreground: #4A4E69;
+  --accent: #F4F6FB;
+  --accent-foreground: #0C193D;
+  --destructive: #ef4444;
+  --border: rgba(12, 25, 61, 0.12);
+  --input: rgba(12, 25, 61, 0.14);
+  --ring: #E07F0A;
+  --chart-1: #E07F0A;
+  --chart-2: #378964;
+  --chart-3: #112046;
+  --chart-4: #E58A10;
+  --chart-5: #C86E09;
+  --sidebar: #F4F6FB;
+  --sidebar-foreground: #0C193D;
+  --sidebar-primary: #E07F0A;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #F4F6FB;
+  --sidebar-accent-foreground: #0C193D;
+  --sidebar-border: rgba(12, 25, 61, 0.12);
+  --sidebar-ring: #E07F0A;
+}
+
+.dark {
+  --background: #0C193D;
+  --foreground: #ffffff;
+  --card: #112046;
+  --card-foreground: #ffffff;
+  --popover: #112046;
+  --popover-foreground: #ffffff;
+  --primary: #E07F0A;
+  --primary-foreground: #ffffff;
+  --secondary: #112046;
+  --secondary-foreground: #ffffff;
+  --muted: #112046;
+  --muted-foreground: #4A4E69;
+  --accent: #112046;
+  --accent-foreground: #ffffff;
+  --destructive: #ef4444;
+  --border: rgba(255, 255, 255, 0.1);
+  --input: rgba(255, 255, 255, 0.14);
+  --ring: #E07F0A;
+}
+
+/* ============================================================
+   DESIGN SYSTEM GROUPE SERMA — Refonte premium
+   Palette CDC conservée à l'identique · Typo conservée
+   Patterns premium inspirés Win-Agro, adaptés & peaufinés
+   ============================================================ */
+@theme {
+  /* — Palette officielle CDC (extrait du logo SERMA) — */
+  --color-marine-profond: #0C193D;
+  --color-marine-moyen: #112046;
+  --color-marine-eleve: #1a2c5a;
+  --color-orange-logo: #E07F0A;
+  --color-orange-sature: #E58A10;
+  --color-orange-contrast: #C86E09;
+  --color-vert-tech: #378964;
+  --color-gris-bleute: #F4F6FB;
+  --color-gris-texte: #4A4E69;
+
+  /* Alias compatibilité (formulaires & anciens composants) */
+  --color-navy: #0C193D;
+  --color-navy-light: #112046;
+  --color-navy-dark: #050b1a;
+  --color-navy-elevated: #1a2c5a;
+  --color-green-serma: #378964;
+  --color-orange-hover: #E58A10;
+  --color-orange: #E07F0A;
+
+  /* — Typographie conservée — */
+  --font-playfair: var(--font-playfair), "Playfair Display", serif;
+  --font-dmsans: var(--font-dmsans), "DM Sans", sans-serif;
+  --font-inter: var(--font-inter), "Inter", sans-serif;
+
+  /* — Ombres signature — */
+  --shadow-soft: 0 4px 24px rgba(12, 25, 61, 0.06), 0 1px 4px rgba(12, 25, 61, 0.04);
+  --shadow-card: 0 8px 32px rgba(12, 25, 61, 0.08);
+  --shadow-orange: 0 8px 28px rgba(224, 127, 10, 0.32);
+  --shadow-orange-sm: 0 4px 14px rgba(224, 127, 10, 0.24);
+  --shadow-deep: 0 20px 60px rgba(5, 11, 26, 0.5);
+
+  /* — Animations — */
+  --animate-float: float 7s ease-in-out infinite;
+  --animate-float-slow: float 11s ease-in-out infinite;
+  --animate-pulse-radar: pulse-radar 2.4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  --animate-badge-marquee: badge-marquee 16s linear infinite;
+}
+
+/* — Keyframes globaux — */
+@keyframes float {
+  0%, 100% { transform: translateY(0) translateX(0); }
+  50% { transform: translateY(-16px) translateX(8px); }
+}
+@keyframes pulse-radar {
+  0% { box-shadow: 0 0 0 0 rgba(55, 137, 100, 0.55); }
+  70% { box-shadow: 0 0 0 16px rgba(55, 137, 100, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(55, 137, 100, 0); }
+}
+@keyframes badge-marquee {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(28px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ============================================================
+   BASE
+   ============================================================ */
+* {
+  border-color: var(--border);
+}
+
+html {
+  scroll-behavior: smooth;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background-color: #ffffff;
+  color: #0C193D;
+  font-family: var(--font-dmsans), "DM Sans", sans-serif;
+  overflow-x: hidden;
+}
+
+::selection {
+  background: rgba(224, 127, 10, 0.22);
+  color: #0C193D;
+}
+
+/* — Scrollbar signature — */
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: #F4F6FB; }
+::-webkit-scrollbar-thumb { background: #0C193D; border-radius: 6px; }
+::-webkit-scrollbar-thumb:hover { background: #E07F0A; }
+
+/* Rail carrousel témoignages (mobile) — scrollbar masquée */
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar { display: none; }
+
+/* — Anti-zoom iOS sur les champs — */
+input, select, textarea { font-size: 16px; }
+@media (min-width: 640px) {
+  input, select, textarea { font-size: 14px; }
+}
+
+button, a, label, [role="button"] {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+button, [role="button"] { min-height: 44px; }
+input[type="checkbox"] { accent-color: #E07F0A; }
+textarea { resize: vertical; }
+
+/* ============================================================
+   UTILITAIRES PREMIUM — signature de la refonte
+   (effets de balayage et halo rotatif logo retirés : sobriété)
+   ============================================================ */
+@layer utilities {
+  /* Panneau verre dépoli — fond clair */
+  .glass-panel {
+    background: rgba(255, 255, 255, 0.88);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(12, 25, 61, 0.1);
+  }
+
+  /* Panneau verre dépoli — fond marine */
+  .glass-panel-dark {
+    background: rgba(17, 32, 70, 0.55);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(255, 255, 255, 0.09);
+  }
+
+  /* Trame pointillée diamond sur les grands aplats */
+  .bg-grain {
+    background-image:
+      radial-gradient(rgba(12, 25, 61, 0.045) 1px, transparent 0),
+      radial-gradient(rgba(12, 25, 61, 0.03) 1px, transparent 0);
+    background-size: 24px 24px;
+    background-position: 0 0, 12px 12px;
+  }
+  .bg-grain-light {
+    background-image:
+      radial-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 0),
+      radial-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 0);
+    background-size: 24px 24px;
+    background-position: 0 0, 12px 12px;
+  }
+
+  /* Grille technique fine (hero) */
+  .bg-grid-fine {
+    background-image:
+      linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+    background-size: 56px 56px;
+  }
+
+  /* Liseré d'arête supérieure dorée — cartes premium */
+  .edge-glow {
+    position: relative;
+  }
+  .edge-glow::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 12%;
+    right: 12%;
+    height: 2px;
+    border-radius: 9999px;
+    background: linear-gradient(
+      90deg,
+      rgba(224, 127, 10, 0) 0%,
+      rgba(229, 138, 16, 0.9) 50%,
+      rgba(224, 127, 10, 0) 100%
+    );
+    filter: blur(0.4px);
+    z-index: 3;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   BACK-OFFICE — Cockpit digital (aucune animation logo / balayage)
+   ═══════════════════════════════════════════════════════════════ */
+@layer utilities {
+  /* Panneau verre sur fond marine — pages login / sélection */
+  .glass-panel-bo {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    backdrop-filter: blur(14px);
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+  }
+
+  /* Scrollbar discrète du back-office */
+  .bo-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+  }
+  .bo-scrollbar::-webkit-scrollbar {
+    width: 5px;
+  }
+  .bo-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .bo-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.18);
+    border-radius: 9999px;
+  }
+  .bo-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.3);
+  }
+
+  /* Scrollbar claire pour les zones de contenu */
+  .bo-scrollbar-light {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(12, 25, 61, 0.22) transparent;
+  }
+  .bo-scrollbar-light::-webkit-scrollbar {
+    width: 6px;
+  }
+  .bo-scrollbar-light::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .bo-scrollbar-light::-webkit-scrollbar-thumb {
+    background: rgba(12, 25, 61, 0.22);
+    border-radius: 9999px;
+  }
+  .bo-scrollbar-light::-webkit-scrollbar-thumb:hover {
+    background: rgba(12, 25, 61, 0.35);
+  }
+}
+
+/* Éditeur tableur back-office — look grille professionnelle */
+.bo-sheet-table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+.bo-sheet-table th,
+.bo-sheet-table td {
+  border-right: 1px solid rgba(12, 25, 61, 0.1);
+  border-bottom: 1px solid rgba(12, 25, 61, 0.08);
+}
+.bo-sheet-cell-selected {
+  outline: 2px solid #e07f0a;
+  outline-offset: -2px;
+  background: rgba(224, 127, 10, 0.06);
+}
+.bo-sheet-row-header {
+  background: #f4f6fb;
+  font-family: var(--font-inter);
+}
+
+/* Éditeur de documents — zone .bo-doc-content (styles du contenu riche) */
+.bo-doc-content h1 {
+  font-size: 1.7rem;
+  font-weight: 800;
+  margin: 1.1rem 0 0.6rem;
+  color: #0c193d;
+}
+.bo-doc-content h2 {
+  font-size: 1.35rem;
+  font-weight: 800;
+  margin: 1rem 0 0.5rem;
+  color: #0c193d;
+}
+.bo-doc-content h3 {
+  font-size: 1.12rem;
+  font-weight: 700;
+  margin: 0.9rem 0 0.4rem;
+  color: #112046;
+}
+.bo-doc-content p {
+  margin: 0.55rem 0;
+  line-height: 1.75;
+}
+.bo-doc-content ul,
+.bo-doc-content ol {
+  margin: 0.55rem 0 0.55rem 1.4rem;
+}
+.bo-doc-content ul {
+  list-style: disc;
+}
+.bo-doc-content ol {
+  list-style: decimal;
+}
+.bo-doc-content li {
+  margin: 0.25rem 0;
+  line-height: 1.7;
+}
+.bo-doc-content blockquote {
+  border-left: 3px solid #e07f0a;
+  padding-left: 1rem;
+  margin: 0.8rem 0;
+  color: #4a4e69;
+  font-style: italic;
+}
+.bo-doc-content table {
+  border-collapse: collapse;
+  margin: 0.8rem 0;
+}
+.bo-doc-content table td,
+.bo-doc-content table th {
+  border: 1px solid rgba(12, 25, 61, 0.18);
+  padding: 6px 10px;
+}
+
+/* Impression PDF — masque le chrome applicatif, ne garde que le document */
+@media print {
+  .bo-no-print {
+    display: none !important;
+  }
+}
