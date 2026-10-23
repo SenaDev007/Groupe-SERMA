@@ -282,12 +282,46 @@ async function applyMutation(m: IncomingMutation): Promise<void> {
       const id = s(p.id);
       const existing = await prisma.document.findUnique({ where: { id } });
       if (!existing) throw new Error("Document introuvable.");
+
+      // Fichier réel (.xlsx) joint à la sauvegarde → écrit sur le disque
+      // et référencé par le document (vrai fichier Excel téléchargeable).
+      let filePath: string | undefined;
+      let size: number | undefined;
+      let mimeType: string | undefined;
+      if (m.fileBase64) {
+        const buffer = Buffer.from(m.fileBase64, "base64");
+        if (buffer.length > 20 * 1024 * 1024) {
+          throw new Error("Fichier trop volumineux (20 Mo maximum).");
+        }
+        const displayName = (optS(p.name) || existing.name).replace(/[\/\\\0]/g, "_");
+        const safeName = /\.xlsx?$/i.test(displayName)
+          ? displayName
+          : `${displayName}.xlsx`;
+        const storedName = `${randomUUID()}-${safeName}`;
+        await fs.mkdir(UPLOAD_DIR, { recursive: true });
+        await fs.writeFile(path.join(UPLOAD_DIR, storedName), buffer);
+        // L'ancien fichier devient orphelin → nettoyage silencieux
+        if (existing.filePath) {
+          await fs
+            .unlink(path.join(UPLOAD_DIR, path.basename(existing.filePath)))
+            .catch(() => {});
+        }
+        filePath = storedName;
+        size = buffer.length;
+        mimeType =
+          optS(p.mimeType) ||
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+      }
+
       await prisma.document.update({
         where: { id },
         data: {
           content: s(p.content),
           name: optS(p.name) || existing.name,
           version: { increment: 1 },
+          ...(filePath ? { filePath } : {}),
+          ...(size !== undefined ? { size } : {}),
+          ...(mimeType ? { mimeType } : {}),
         },
       });
       return;

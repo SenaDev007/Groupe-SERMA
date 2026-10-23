@@ -16,7 +16,7 @@
  * + rejeu PostgreSQL dès que la connexion revient).
  */
 
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { useBoData } from "@/hooks/useBoData";
@@ -76,6 +76,8 @@ import {
   ExternalLink,
   FilePlus2,
   HardDrive,
+  List,
+  LayoutGrid,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -122,6 +124,33 @@ function uniqueName(taken: Set<string>, desired: string): string {
   let i = 2;
   while (has(`${desired} (${i})`)) i++;
   return `${desired} (${i})`;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Composant principal
+// ─────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────
+// Vue Liste / Grille — persistée dans localStorage (store externe)
+// ─────────────────────────────────────────────────────────────
+
+const VIEW_KEY = "bo-explorer-view";
+const VIEW_EVENT = "bo-explorer-view-change";
+type ExplorerView = "list" | "grid";
+
+function subscribeView(callback: () => void) {
+  window.addEventListener(VIEW_EVENT, callback);
+  return () => window.removeEventListener(VIEW_EVENT, callback);
+}
+function getSnapshotView(): ExplorerView {
+  return window.localStorage.getItem(VIEW_KEY) === "grid" ? "grid" : "list";
+}
+function getServerSnapshotView(): ExplorerView {
+  return "list";
+}
+function setExplorerView(mode: ExplorerView) {
+  window.localStorage.setItem(VIEW_KEY, mode);
+  window.dispatchEvent(new Event(VIEW_EVENT));
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -195,6 +224,11 @@ export function ClientExplorer({
   const currentFolderId = currentId ?? rootId;
   const [expanded, setExpanded] = useState<Set<string>>(new Set([rootId]));
   const [treeOpen, setTreeOpen] = useState(false); // panneau mobile
+  // Vue « Liste » (une ligne par élément, libellé complet) ou « Grille » (cartes
+  // compactes) — comme l'explorateur Windows. Liste par défaut : libellés
+  // toujours sur une seule ligne, bien visibles, jamais repliés sur deux lignes.
+  // Persistée dans localStorage via un store externe (useSyncExternalStore).
+  const viewMode = useSyncExternalStore(subscribeView, getSnapshotView, getServerSnapshotView);
 
   const currentFolder = folders.find((f) => f.id === currentFolderId);
   const breadcrumb = useMemo(
@@ -399,7 +433,44 @@ export function ClientExplorer({
           <FolderOpen className="w-4 h-4 mr-1.5" aria-hidden />
           Arborescence
         </Button>
-        <span className="hidden sm:inline ml-auto text-xs font-semibold text-gris-texte tabular-nums">
+        {/* Bascule Liste / Grille (comme l'explorateur Windows) */}
+        <div
+          role="group"
+          aria-label="Mode d'affichage des éléments"
+          className="ml-auto flex items-center rounded-lg border border-marine-profond/[0.12] bg-white p-0.5"
+        >
+          <button
+            type="button"
+            aria-label="Vue Liste — libellés sur une seule ligne"
+            aria-pressed={viewMode === "list"}
+            title="Vue Liste — libellés sur une seule ligne"
+            onClick={() => setExplorerView("list")}
+            className={cn(
+              "w-8 h-8 flex items-center justify-center rounded-md transition-colors",
+              viewMode === "list"
+                ? "bg-marine-profond text-white shadow-sm"
+                : "text-gris-texte hover:text-marine-profond hover:bg-gris-bleute"
+            )}
+          >
+            <List className="w-4 h-4" aria-hidden />
+          </button>
+          <button
+            type="button"
+            aria-label="Vue Grille — cartes compactes"
+            aria-pressed={viewMode === "grid"}
+            title="Vue Grille — cartes compactes"
+            onClick={() => setExplorerView("grid")}
+            className={cn(
+              "w-8 h-8 flex items-center justify-center rounded-md transition-colors",
+              viewMode === "grid"
+                ? "bg-marine-profond text-white shadow-sm"
+                : "text-gris-texte hover:text-marine-profond hover:bg-gris-bleute"
+            )}
+          >
+            <LayoutGrid className="w-4 h-4" aria-hidden />
+          </button>
+        </div>
+        <span className="hidden sm:inline text-xs font-semibold text-gris-texte tabular-nums">
           {totalItems} élément{totalItems > 1 ? "s" : ""}
         </span>
       </div>
@@ -473,7 +544,11 @@ export function ClientExplorer({
             </div>
           ) : (
             <div
-              className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3"
+              className={cn(
+                viewMode === "grid"
+                  ? "grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3"
+                  : "flex flex-col gap-1.5"
+              )}
               onDragOver={(e) => {
                 if (dragItem) e.preventDefault();
               }}
@@ -482,27 +557,56 @@ export function ClientExplorer({
                 handleDrop(currentFolderId);
               }}
             >
-              {subfolders.map((f) => (
-                <FolderCard
-                  key={f.id}
-                  folder={f}
-                  folders={folders}
-                  documents={documents}
-                  dropActive={dropTarget === f.id && canDrop(f.id, dragItem)}
-                  canDrop={canDrop(f.id, dragItem)}
-                  onOpen={() => navigateTo(f.id)}
-                  onRename={() => setNameDialog({ mode: "rename-folder", folder: f })}
-                  onMove={() => setMoveDialog({ kind: "folder", id: f.id, name: f.name })}
-                  onDelete={() => openDeleteFolder(f)}
-                  onDragItemChange={updateDragItem}
-                  onDragOver={setDropTarget}
-                  onDrop={() => handleDrop(f.id)}
-                />
-              ))}
+              {subfolders.map((f) =>
+                viewMode === "grid" ? (
+                  <FolderCard
+                    key={f.id}
+                    folder={f}
+                    folders={folders}
+                    documents={documents}
+                    dropActive={dropTarget === f.id && canDrop(f.id, dragItem)}
+                    canDrop={canDrop(f.id, dragItem)}
+                    onOpen={() => navigateTo(f.id)}
+                    onRename={() => setNameDialog({ mode: "rename-folder", folder: f })}
+                    onMove={() => setMoveDialog({ kind: "folder", id: f.id, name: f.name })}
+                    onDelete={() => openDeleteFolder(f)}
+                    onDragItemChange={updateDragItem}
+                    onDragOver={setDropTarget}
+                    onDrop={() => handleDrop(f.id)}
+                  />
+                ) : (
+                  <FolderRow
+                    key={f.id}
+                    folder={f}
+                    folders={folders}
+                    documents={documents}
+                    dropActive={dropTarget === f.id && canDrop(f.id, dragItem)}
+                    canDrop={canDrop(f.id, dragItem)}
+                    onOpen={() => navigateTo(f.id)}
+                    onRename={() => setNameDialog({ mode: "rename-folder", folder: f })}
+                    onMove={() => setMoveDialog({ kind: "folder", id: f.id, name: f.name })}
+                    onDelete={() => openDeleteFolder(f)}
+                    onDragItemChange={updateDragItem}
+                    onDragOver={setDropTarget}
+                    onDrop={() => handleDrop(f.id)}
+                  />
+                )
+              )}
               {folderDocs.map((d) => {
                 const meta = KIND_META[d.kind] ?? KIND_META.FILE;
-                return (
+                return viewMode === "grid" ? (
                   <FileCard
+                    key={d.id}
+                    doc={d}
+                    meta={meta}
+                    onOpen={() => router.push(`/back-office/cabinet/documents/${d.id}`)}
+                    onRename={() => setNameDialog({ mode: "rename-document", doc: d })}
+                    onMove={() => setMoveDialog({ kind: "document", id: d.id, name: d.name })}
+                    onDelete={() => setDeleteDialog({ kind: "document", id: d.id, name: d.name })}
+                    onDragItemChange={updateDragItem}
+                  />
+                ) : (
+                  <FileRow
                     key={d.id}
                     doc={d}
                     meta={meta}
@@ -794,7 +898,7 @@ function FolderCard({
           <Folder className="w-6 h-6" aria-hidden />
         </span>
         <div className="min-w-0 flex-1 pe-10">
-          <p className="font-semibold text-marine-profond text-[13.5px] leading-snug break-words line-clamp-2">
+          <p className="font-semibold text-marine-profond text-[13.5px] leading-snug whitespace-nowrap overflow-hidden text-ellipsis">
             {folder.name}
           </p>
           <p className="text-[11px] text-gris-texte mt-1 tabular-nums">
@@ -854,7 +958,7 @@ function FileCard({
           <Icon className="w-6 h-6" aria-hidden />
         </span>
         <div className="min-w-0 flex-1 pe-10">
-          <p className="font-semibold text-marine-profond text-[13.5px] leading-snug break-words line-clamp-2">
+          <p className="font-semibold text-marine-profond text-[13.5px] leading-snug whitespace-nowrap overflow-hidden text-ellipsis">
             {doc.name}
           </p>
           <p className="text-[11px] text-gris-texte mt-1 tabular-nums">
@@ -869,6 +973,146 @@ function FileCard({
           )}
         </div>
       </div>
+      <CardActions name={doc.name} onRename={onRename} onMove={onMove} onDelete={onDelete} />
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Vue Liste — une ligne pleine largeur par élément, libellé sur
+// UNE SEULE LIGNE, entièrement visible (comme les détails Windows).
+// ─────────────────────────────────────────────────────────────
+
+function FolderRow({
+  folder,
+  folders,
+  documents,
+  dropActive,
+  canDrop,
+  onOpen,
+  onRename,
+  onMove,
+  onDelete,
+  onDragItemChange,
+  onDragOver,
+  onDrop,
+}: {
+  folder: FolderRecord;
+  folders: FolderRecord[];
+  documents: ExplorerDocument[];
+  dropActive: boolean;
+  canDrop: boolean;
+  onOpen: () => void;
+  onRename: () => void;
+  onMove: () => void;
+  onDelete: () => void;
+  onDragItemChange: (item: DragItem | null) => void;
+  onDragOver: (id: string | null) => void;
+  onDrop: () => void;
+}) {
+  const subCount = childFoldersOf(folders, folder.clientId, folder.id).length;
+  const docCount = documents.filter((d) => d.folderId === folder.id).length;
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      draggable
+      onDragStart={(e) => {
+        if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+        onDragItemChange({ kind: "folder", id: folder.id });
+      }}
+      onDragEnd={() => onDragItemChange(null)}
+      onDragOver={(e) => {
+        if (!canDrop) return;
+        e.preventDefault();
+        onDragOver(folder.id);
+      }}
+      onDragLeave={() => onDragOver(null)}
+      onDrop={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onDrop();
+      }}
+      onClick={onOpen}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") onOpen();
+      }}
+      onDoubleClick={onOpen}
+      className={cn(
+        "group relative flex items-center gap-3 rounded-lg border border-marine-profond/[0.07] bg-white px-3 py-2.5 cursor-pointer transition-all hover:border-orange-logo/40 hover:shadow-[0_2px_10px_rgba(224,127,10,0.1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-logo/50",
+        dropActive && "ring-2 ring-orange-logo/70 bg-orange-logo/[0.06]"
+      )}
+      title={folder.name}
+    >
+      <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-orange-logo/[0.09] text-orange-logo shrink-0">
+        <Folder className="w-5 h-5" aria-hidden />
+      </span>
+      {/* Libellé : une seule ligne, jamais replié ni tronqué sur deux lignes */}
+      <p className="min-w-0 flex-1 font-semibold text-marine-profond text-[13.5px] whitespace-nowrap overflow-hidden text-ellipsis">
+        {folder.name}
+      </p>
+      <p className="hidden sm:block shrink-0 text-[11px] text-gris-texte tabular-nums pe-24">
+        {subCount > 0 && `${subCount} sous-dossier${subCount > 1 ? "s" : ""} · `}
+        {docCount} fichier{docCount > 1 ? "s" : ""}
+      </p>
+      <CardActions name={folder.name} onRename={onRename} onMove={onMove} onDelete={onDelete} />
+    </div>
+  );
+}
+
+function FileRow({
+  doc,
+  meta,
+  onOpen,
+  onRename,
+  onMove,
+  onDelete,
+  onDragItemChange,
+}: {
+  doc: ExplorerDocument;
+  meta: { label: string; icon: React.ElementType; tone: string };
+  onOpen: () => void;
+  onRename: () => void;
+  onMove: () => void;
+  onDelete: () => void;
+  onDragItemChange: (item: DragItem | null) => void;
+}) {
+  const Icon = meta.icon;
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      draggable
+      onDragStart={(e) => {
+        if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+        onDragItemChange({ kind: "document", id: doc.id });
+      }}
+      onDragEnd={() => onDragItemChange(null)}
+      onClick={onOpen}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") onOpen();
+      }}
+      onDoubleClick={onOpen}
+      className="group relative flex items-center gap-3 rounded-lg border border-marine-profond/[0.07] bg-white px-3 py-2.5 cursor-pointer transition-all hover:border-orange-logo/40 hover:shadow-[0_2px_10px_rgba(224,127,10,0.1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-logo/50"
+      title={doc.name}
+    >
+      <span className={cn("flex items-center justify-center w-9 h-9 rounded-lg shrink-0", meta.tone)}>
+        <Icon className="w-5 h-5" aria-hidden />
+      </span>
+      {/* Libellé : une seule ligne, jamais replié ni tronqué sur deux lignes */}
+      <p className="min-w-0 flex-1 font-semibold text-marine-profond text-[13.5px] whitespace-nowrap overflow-hidden text-ellipsis">
+        {doc.name}
+        {doc.pendingUpload && (
+          <span className="ml-2 text-[10px] font-bold text-orange-contrast inline-flex items-center gap-1 align-middle">
+            <AlertCircle className="w-3 h-3" aria-hidden /> Téléversement en attente
+          </span>
+        )}
+      </p>
+      <p className="hidden sm:block shrink-0 text-[11px] text-gris-texte tabular-nums pe-24">
+        {doc.source === "IMPORT" ? "Importé" : meta.label}
+        {doc.size ? ` · ${formatBytes(doc.size)}` : ""}
+        {` · ${formatDateFr(doc.updatedAt)}`}
+      </p>
       <CardActions name={doc.name} onRename={onRename} onMove={onMove} onDelete={onDelete} />
     </div>
   );

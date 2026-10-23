@@ -50,6 +50,8 @@
     "@tanstack/react-query": "^5.82.0",
     "@tanstack/react-table": "^8.21.3",
     "@types/canvas-confetti": "^1.9.0",
+    "@univerjs/preset-sheets-core": "^1.2.0",
+    "@univerjs/presets": "^1.2.0",
     "bcryptjs": "^3.0.3",
     "canvas-confetti": "^1.9.4",
     "class-variance-authority": "^0.7.1",

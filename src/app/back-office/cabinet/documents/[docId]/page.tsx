@@ -1,13 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import prisma from "@/lib/prisma";
-import { SpreadsheetEditor, type SheetData } from "@/components/back-office/SpreadsheetEditor";
+import { UniverSheetEditor } from "@/components/back-office/UniverSheetEditor";
 import { DocumentEditor } from "@/components/back-office/DocumentEditor";
 import { FileViewer } from "@/components/back-office/FileViewer";
 import { BoBadge, BoPageHeader } from "@/components/back-office/BoKit";
 import { DOC_KIND_LABELS, formatDateFr, formatBytes } from "@/lib/back-office/constants";
 import { Button } from "@/components/ui/button";
-import { ChevronRight, ArrowLeft, FileSpreadsheet, Download } from "lucide-react";
+import { ChevronRight, ArrowLeft } from "lucide-react";
 import type { Metadata } from "next";
 
 export const dynamic = "force-dynamic";
@@ -107,12 +107,13 @@ export default async function DocumentEditorPage({
 
       {doc.kind === "SHEET" && (
         <>
-          <BoPageHeader eyebrow="Éditeur tableur" title="Feuille de calcul" description="Édition complète avec formules, export Excel (.xlsx), CSV et PDF — compatible Google Sheets." />
+          <BoPageHeader eyebrow="Éditeur Excel" title="Classeur Excel" description="Vrai fichier .xlsx — formules complètes (400+ fonctions), feuilles multiples, formats. S'ouvre dans Microsoft Excel, Google Sheets et LibreOffice." />
           {meta}
-          <SpreadsheetEditor
+          <UniverSheetEditor
             documentId={doc.id}
             documentName={doc.name}
-            initialData={parseSheet(doc.content)}
+            hasFile={!!doc.filePath}
+            fallbackLegacy={parseLegacy(doc.content)}
           />
         </>
       )}
@@ -129,36 +130,26 @@ export default async function DocumentEditorPage({
         </>
       )}
 
-      {/* Fichier Excel importé dont le contenu a été converti → éditeur tableur */}
-      {doc.kind === "FILE" && doc.content && (
+      {/* Fichier Excel importé (.xlsx) → édition directe du VRAI fichier */}
+      {doc.kind === "FILE" && isXlsx(doc) && (
         <>
           <BoPageHeader
             eyebrow="Fichier Excel importé"
-            title="Feuille convertie — édition dans le cockpit"
-            description="Le contenu de ce fichier importé est éditable ici. Le fichier original reste téléchargeable à tout moment."
+            title="Classeur Excel"
+            description="Le fichier original s'ouvre ici avec ses formules et formats d'origine — les modifications l'enregistrent en tant que vrai fichier .xlsx."
           />
           {meta}
-          <div className="mb-4 flex items-center gap-3 rounded-xl border border-orange-logo/25 bg-orange-logo/[0.06] px-4 py-3">
-            <FileSpreadsheet className="w-5 h-5 text-orange-contrast shrink-0" aria-hidden />
-            <p className="text-[13px] text-marine-profond/80 flex-1">
-              Fichier importé converti pour l&apos;édition — les exports (.xlsx, CSV, PDF) repartent depuis la grille ci-dessous.
-            </p>
-            <Button asChild variant="outline" size="sm" className="h-8 border-marine-profond/20 text-marine-profond">
-              <a href={`/api/back-office/files/${doc.id}`} download={doc.name}>
-                <Download className="w-3.5 h-3.5 mr-1.5" aria-hidden />
-                Original
-              </a>
-            </Button>
-          </div>
-          <SpreadsheetEditor
+          <UniverSheetEditor
             documentId={doc.id}
             documentName={doc.name}
-            initialData={parseSheet(doc.content)}
+            hasFile={!!doc.filePath}
+            fallbackLegacy={parseLegacy(doc.content)}
           />
         </>
       )}
 
-      {doc.kind === "FILE" && !doc.content && (
+      {/* Fichier non-Excel importé (PDF, image…) → visionnage */}
+      {doc.kind === "FILE" && !isXlsx(doc) && (
         <>
           <BoPageHeader eyebrow="Fichier importé" title={doc.name} description="Fichier du dossier client — téléchargeable à tout moment." />
           {meta}
@@ -174,18 +165,28 @@ export default async function DocumentEditorPage({
   );
 }
 
-function parseSheet(content: string | null): SheetData {
-  if (!content) return { cols: ["Colonne A", "Colonne B", "Colonne C"], rows: Array.from({ length: 8 }, () => ["", "", ""]) };
+function isXlsx(doc: { name: string; mimeType: string | null }): boolean {
+  return (
+    /\.xlsx?$/i.test(doc.name) ||
+    !!doc.mimeType?.includes("spreadsheetml") ||
+    !!doc.mimeType?.includes("ms-excel")
+  );
+}
+
+function parseLegacy(content: string | null): { cols: string[]; rows: string[][] } | null {
+  if (!content) return null;
   try {
     const parsed = JSON.parse(content);
     if (Array.isArray(parsed?.cols) && Array.isArray(parsed?.rows)) {
       return {
         cols: parsed.cols.map((c: unknown) => String(c ?? "")),
-        rows: parsed.rows.map((r: unknown[]) => (Array.isArray(r) ? r.map((c) => String(c ?? "")) : [])),
+        rows: parsed.rows.map((r: unknown[]) =>
+          Array.isArray(r) ? r.map((c) => String(c ?? "")) : []
+        ),
       };
     }
   } catch {
-    // contenu illisible → feuille vide
+    // contenu illisible → pas de repli
   }
-  return { cols: ["Colonne A", "Colonne B", "Colonne C"], rows: Array.from({ length: 8 }, () => ["", "", ""]) };
+  return null;
 }

@@ -230,6 +230,8 @@ export function applyMutationLocal(
               name: p.name?.trim() || d.name,
               version: d.version + 1,
               updatedAt: nowIso(),
+              ...(p.size !== undefined ? { size: p.size } : {}),
+              ...(p.mimeType ? { mimeType: p.mimeType } : {}),
             }
           : d
       );

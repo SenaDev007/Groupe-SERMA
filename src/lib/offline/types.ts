@@ -239,7 +239,16 @@ export interface MutationDocumentSaveContent {
   id: string;
   type: "document.saveContent";
   createdAt: string;
-  payload: { id: string; name?: string; content: string };
+  payload: {
+    id: string;
+    name?: string;
+    content: string;
+    /** Fichier réel (.xlsx) stocké en local (IndexedDB « blobs ») —
+     * résolu en fileBase64 par le moteur au moment de la synchro. */
+    blobKey?: string;
+    size?: number;
+    mimeType?: string;
+  };
 }
 export interface MutationDocumentRename {
   id: string;

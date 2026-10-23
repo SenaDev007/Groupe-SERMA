@@ -290,7 +290,10 @@ class BoEngine {
       for (const e of entries) {
         let fileBase64: string | undefined;
         const p = e.payload as { blobKey?: string };
-        if (e.type === "document.import" && p?.blobKey) {
+        if (
+          (e.type === "document.import" || e.type === "document.saveContent") &&
+          p?.blobKey
+        ) {
           const blob = await blobGet(p.blobKey);
           if (blob) fileBase64 = await blobToBase64(blob);
         }
@@ -322,6 +325,8 @@ class BoEngine {
         if (r.ok) {
           await outboxDelete(r.id);
           const p = entry.payload as { blobKey?: string };
+          // import : le blob était un simple colis de téléversement → purge.
+          // saveContent : le blob est le cache local de réouverture → conservé.
           if (entry.type === "document.import" && p?.blobKey) {
             await blobDelete(p.blobKey);
           }
