@@ -100,10 +100,6 @@ function extractBridge(api: FUniver): BridgeWorkbook {
     const rows = Math.min(fws.getMaxRows(), 5000);
     const cols = Math.min(fws.getMaxColumns(), 120);
 
-    // Valeurs calculées (résultats de formules inclus) + formules brutes
-    const values = fws.getRange(0, 0, rows, cols).getValues();
-    const formulas = fws.getRange(0, 0, rows, cols).getFormulas();
-
     const cells: Record<string, BridgeSheet["cells"][string]> = {};
     const cellData = (snap.cellData ?? {}) as Record<
       number,
@@ -117,14 +113,29 @@ function extractBridge(api: FUniver): BridgeWorkbook {
         if (r >= rows || c >= cols) continue;
 
         const out: BridgeSheet["cells"][string] = {};
-        const formula = formulas[r]?.[c];
-        if (typeof formula === "string" && formula.startsWith("=") && formula.length > 1) {
+        // Valeurs et formules BRUTES du snapshot : les nombres restent des
+        // nombres (résultats de formules inclus). getValues() renverrait
+        // les chaînes formatées d'affichage (« 18 450 000 ») — Excel y
+        // lirait alors du TEXTE et SOMME() ignorerait les montants.
+        const raw = cd.v as string | number | boolean | null | undefined;
+        const formula = typeof cd.f === "string" ? cd.f : undefined;
+        if (formula && formula.startsWith("=") && formula.length > 1) {
           out.f = formula.slice(1);
-          const v = values[r]?.[c];
-          if (v !== null && v !== undefined) out.v = v as string | number | boolean;
-        } else {
-          const v = values[r]?.[c];
-          if (v !== null && v !== undefined && v !== "") out.v = v as string | number | boolean;
+          if (raw !== null && raw !== undefined) out.v = raw;
+        } else if (raw !== null && raw !== undefined && raw !== "") {
+          out.v = raw;
+        }
+        // Repli riche : cellule sans v mais avec contenu riche (p) → texte brut
+        else if (
+          (raw === null || raw === undefined || raw === "") &&
+          cd.p &&
+          typeof cd.p === "object" &&
+          cd.p.body &&
+          typeof (cd.p.body as { dataStream?: unknown }).dataStream === "string"
+        ) {
+          const stream = (cd.p.body as { dataStream: string }).dataStream;
+          const text = stream.replace(/\r\n$/, "").trim();
+          if (text) out.v = text;
         }
         // Style complet + format de nombre depuis le style référencé
         const sRef = cd.s;

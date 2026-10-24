@@ -931,12 +931,29 @@ export function bridgeToHtmlTable(sheet: BridgeSheet): string {
   const esc = (s: string) =>
     s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
+  /** Applique le format de nombre Excel (#,##0 · 0,00 % …) pour l'affichage. */
+  const fmt = (v: string | number | boolean | undefined, z: string | undefined): string => {
+    if (v === undefined || v === null) return "";
+    if (typeof v !== "number" || !z) return String(v);
+    const m = z.match(/(?:\.|,)(0+)/);
+    const decimals = m ? m[1].length : 0;
+    const isPercent = z.includes("%");
+    const value = isPercent ? v * 100 : v;
+    const fixed = (isPercent && Math.abs(value) < 1e-6 ? 0 : value).toFixed(decimals);
+    const neg = fixed.startsWith("-");
+    const digits = neg ? fixed.slice(1) : fixed;
+    const [int, dec] = digits.split(".");
+    const intFmt = int.replace(/\B(?=(\d{3})+(?!\d))/g, "\u202F");
+    const body = intFmt + (dec ? "," + dec : "");
+    return (neg ? "−" : "") + body + (isPercent ? " %" : "");
+  };
+
   const rows: string[] = [];
   for (let r = 0; r <= maxR; r++) {
     const tds: string[] = [];
     for (let c = 0; c <= maxC; c++) {
       const cell = sheet.cells[key(r, c)];
-      const text = cell?.v !== undefined ? String(cell.v) : "";
+      const text = cell ? fmt(cell.v, cell.z) : "";
       tds.push(`<td>${esc(text)}</td>`);
     }
     rows.push(`<tr>${tds.join("")}</tr>`);

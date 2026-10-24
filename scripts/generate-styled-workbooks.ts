@@ -473,6 +473,11 @@ async function main() {
         filePath: storedName,
         size: buffer.length,
         mimeType: XLSX_MIME,
+        // Incrément de version : invalide les caches IndexedDB clients
+        // (sinon un navigateur ayant enregistré une version antérieure
+        // continuerait à servir son blob local plus « frais » que le
+        // fichier régénéré côté serveur).
+        version: { increment: 1 },
       },
     });
     styled++;
@@ -504,6 +509,7 @@ async function main() {
           filePath: storedName,
           mimeType: DOCX_MIME,
           size: buffer.length,
+          version: { increment: 1 },
         },
       });
       generated++;
