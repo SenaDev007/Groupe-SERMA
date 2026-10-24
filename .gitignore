@@ -74,3 +74,6 @@ prompt
 server.log
 # Skills directory
 /skills/src/generated/
+
+# Dossier skills de la plateforme d'hébergement
+/skills/
