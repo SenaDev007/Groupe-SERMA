@@ -13,7 +13,12 @@
  *
  * Le script est idempotent : ré-exécutable sans duplication.
  */
-const { PrismaClient } = require("@prisma/client");
+// Client selon la base active : Neon (postgres) ou miroir local (SQLite)
+const { PrismaClient } =
+  process.env.SERMAHUB_DATABASE_URL &&
+  !process.env.SERMAHUB_DATABASE_URL.startsWith("file:")
+    ? require("@prisma/client")
+    : require("../src/generated/prisma-sqlite");
 const prisma = new PrismaClient();
 
 async function main() {

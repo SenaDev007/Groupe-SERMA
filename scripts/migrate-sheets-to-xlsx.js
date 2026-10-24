@@ -12,7 +12,12 @@
  * Idempotent : ré-exécutable sans duplication.
  * Usage : node scripts/migrate-sheets-to-xlsx.js
  */
-const { PrismaClient } = require("@prisma/client");
+// Client selon la base active : Neon (postgres) ou miroir local (SQLite)
+const { PrismaClient } =
+  process.env.SERMAHUB_DATABASE_URL &&
+  !process.env.SERMAHUB_DATABASE_URL.startsWith("file:")
+    ? require("@prisma/client")
+    : require("../src/generated/prisma-sqlite");
 const { randomUUID } = require("crypto");
 const XLSX = require("xlsx");
 const fs = require("fs");

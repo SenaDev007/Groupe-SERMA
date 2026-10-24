@@ -2,14 +2,24 @@
  *
  * Stratégies :
  *  - /_next/static/*, icônes, polices → CacheFirst (fichiers immuables hashés)
- *  - Navigations (HTML) + payloads RSC  → NetworkFirst + repli cache local
+ *  - Navigations (HTML) → NetworkFirst (30 s) + repli cache local + page hors-ligne
+ *  - Payloads RSC → NetworkFirst (30 s) + repli cache local
  *  - Téléchargements /api/back-office/files/* → NetworkFirst + cache
  *  - Page de secours /back-office/offline préchargée à l'installation
  *  - Background Sync « bo-flush » → réveil du moteur de synchronisation
- *    dès que la connexion revient
+ *    dès le retour de la connexion
+ *
+ * ⚠️ Enregistré UNIQUEMENT en build de production (voir PwaControls) :
+ *    en développement, le serveur compile les routes à la demande
+ *    (plusieurs secondes) et un service worker qui interromprait ces
+ *    réponses lentes casserait la navigation et le fast-refresh.
+ *
+ * Les délais d'attente sont volontairement LONGS (30 s) : sur une
+ * connexion lente, il vaut mieux laisser la requête aboutir que de
+ * faussement basculer l'application en « mode hors-ligne ».
  */
 
-const VERSION = "v1";
+const VERSION = "v2";
 const STATIC_CACHE = `serma-bo-static-${VERSION}`;
 const PAGES_CACHE = `serma-bo-pages-${VERSION}`;
 const RUNTIME_CACHE = `serma-bo-runtime-${VERSION}`;
@@ -50,7 +60,8 @@ self.addEventListener("message", (event) => {
   if (event.data === "SKIP_WAITING") self.skipWaiting();
 });
 
-/** Fetch avec délai d'attente : évite de bloquer sur une connexion lente. */
+/** Fetch avec délai d'attente LONG : la connexion peut être lente —
+ *  on n'abandonne qu'après 30 s, jamais avant. */
 async function fetchWithTimeout(request, ms) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ms);
@@ -70,7 +81,7 @@ async function cacheFirst(request, cacheName) {
   return response;
 }
 
-async function networkFirst(request, cacheName, { timeout = 8000 } = {}) {
+async function networkFirst(request, cacheName, { timeout = 30_000 } = {}) {
   const cache = await caches.open(cacheName);
   try {
     const response = await fetchWithTimeout(request, timeout);
@@ -103,12 +114,12 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // 2. Navigations HTML → NetworkFirst + repli cache + page hors-ligne
+  // 2. Navigations HTML → NetworkFirst (30 s) + repli cache + page hors-ligne
   if (request.mode === "navigate") {
     event.respondWith(
       (async () => {
         try {
-          return await networkFirst(request, PAGES_CACHE, { timeout: 8000 });
+          return await networkFirst(request, PAGES_CACHE, { timeout: 30_000 });
         } catch {
           const fallback = await caches.match("/back-office/offline");
           return (
@@ -128,12 +139,15 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // 3. Payloads RSC (navigation client-side Next.js) → NetworkFirst + cache
+  // 3. Payloads RSC (navigation client-side Next.js) → NetworkFirst (30 s)
+  //    Ne JAMAIS interrompre prématurément : une réponse lente du serveur
+  //    ne signifie pas que l'app est hors-ligne — c'était la cause de
+  //    « clics qui ne font rien » sur connexion lente.
   if (url.searchParams.has("_rsc") || request.headers.get("RSC") === "1") {
     event.respondWith(
       (async () => {
         try {
-          return await networkFirst(request, PAGES_CACHE, { timeout: 6000 });
+          return await networkFirst(request, PAGES_CACHE, { timeout: 30_000 });
         } catch {
           return new Response("", { status: 503, statusText: "Offline" });
         }
@@ -147,7 +161,7 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(
       (async () => {
         try {
-          return await networkFirst(request, RUNTIME_CACHE, { timeout: 15000 });
+          return await networkFirst(request, RUNTIME_CACHE, { timeout: 30_000 });
         } catch {
           return new Response("Fichier indisponible hors-ligne.", { status: 503 });
         }

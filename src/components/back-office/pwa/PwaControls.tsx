@@ -45,9 +45,17 @@ export function PwaControls({ variant = "full" }: { variant?: "full" | "boot" })
   const [installed, setInstalled] = React.useState(false);
   const [justSynced, setJustSynced] = React.useState(false);
 
-  // Enregistrement du service worker
+  // Enregistrement du service worker — UNIQUEMENT en production.
+  // En développement, le serveur Next compile les routes à la demande
+  // (réponses de plusieurs secondes) : un service worker qui interrompt
+  // ces réponses lentes casse la navigation (clics sans effet) et le
+  // fast-refresh. En production les réponses sont rapides et le SW
+  // apporte le mode hors-ligne sans risque.
   React.useEffect(() => {
-    if ("serviceWorker" in navigator) {
+    if (
+      "serviceWorker" in navigator &&
+      process.env.NODE_ENV === "production"
+    ) {
       navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(() => {
         // Échec non bloquant : l'app reste utilisable en ligne
       });

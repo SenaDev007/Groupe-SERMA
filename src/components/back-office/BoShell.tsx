@@ -134,7 +134,7 @@ export function BoShell({
       <div className="px-5 py-4 border-b border-white/[0.08]">
         <div className="flex items-center gap-3 rounded-xl bg-white/[0.05] border border-white/10 px-3.5 py-3">
           <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-orange-logo/15 border border-orange-logo/30 shrink-0">
-            <meta.icon className="w-4.5 h-4.5 w-[18px] h-[18px] text-orange-sature" aria-hidden />
+            <meta.icon className="w-[18px] h-[18px] text-orange-sature" aria-hidden />
           </span>
           <div className="min-w-0">
             <p className="text-[13px] font-bold leading-tight truncate">{meta.name}</p>

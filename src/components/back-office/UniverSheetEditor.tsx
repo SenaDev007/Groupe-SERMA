@@ -200,6 +200,12 @@ export function UniverSheetEditor({
     let disposed = false;
     let univerInstance: { dispose: () => void } | null = null;
 
+    // Garde-fou : si le démarrage dépasse 45 s (connexion très lente),
+    // on passe en erreur plutôt que de tourner indéfiniment.
+    const watchdog = setTimeout(() => {
+      if (!disposed) setStatus((s) => (s === "loading" ? "error" : s));
+    }, 45_000);
+
     async function boot() {
       // 1) Dernier fichier connu : cache local d'abord (hors-ligne OK)
       let bytes: Uint8Array | null = null;
@@ -312,6 +318,7 @@ export function UniverSheetEditor({
 
     return () => {
       disposed = true;
+      clearTimeout(watchdog);
       bundleRef.current = null;
       try {
         univerInstance?.dispose();
@@ -605,15 +612,20 @@ ${tables}
         {status === "loading" && (
           <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 text-gris-texte bg-white">
             <Loader2 className="w-8 h-8 animate-spin text-orange-logo" aria-hidden />
-            <p className="text-sm font-semibold">Chargement du classeur Excel…</p>
-            <p className="text-xs">Moteur de calcul Univer (400+ fonctions)</p>
+            <p className="text-sm font-semibold">Chargement du classeur…</p>
+            <p className="text-xs">{name}</p>
           </div>
         )}
         {status === "error" && (
-          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 text-gris-texte bg-white">
+          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 text-gris-texte bg-white px-6 text-center">
             <TriangleAlert className="w-8 h-8 text-orange-contrast" aria-hidden />
             <p className="text-sm font-semibold text-marine-profond">
               Impossible de démarrer l&apos;éditeur Excel.
+            </p>
+            <p className="text-xs max-w-sm">
+              Le moteur de calcul n&apos;a pas pu être chargé (connexion trop lente
+              ou interrompue). Réessayez — le second chargement utilise le cache
+              du navigateur et est beaucoup plus rapide.
             </p>
             <Button variant="outline" size="sm" onClick={() => window.location.reload()}>
               Réessayer
@@ -628,9 +640,8 @@ ${tables}
       </div>
 
       <p className="text-[11px] text-gris-texte leading-relaxed">
-        Vrai fichier Excel (.xlsx) — s&apos;ouvre directement dans Microsoft Excel,
-        Google Sheets et LibreOffice. Formules, formats, feuilles multiples et fusions
-        sont conservés. Raccourci <strong>Ctrl+S</strong> pour enregistrer.
+        Raccourci <strong>Ctrl+S</strong> pour enregistrer. Export Excel, CSV et PDF
+        depuis la barre d&apos;outils.
       </p>
     </div>
   );

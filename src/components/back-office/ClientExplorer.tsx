@@ -781,7 +781,6 @@ function TreeNode({
           type="button"
           onClick={() => onNavigate(id)}
           className="flex items-center gap-2 min-w-0 flex-1 text-left py-0.5"
-          title={name}
         >
           {isRoot ? (
             <RootIcon className="w-4 h-4 text-orange-contrast shrink-0" aria-hidden />
@@ -891,7 +890,6 @@ function FolderCard({
         "group relative rounded-xl border border-marine-profond/[0.08] bg-white p-3 cursor-pointer transition-all hover:border-orange-logo/40 hover:shadow-[0_4px_16px_rgba(224,127,10,0.12)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-logo/50",
         dropActive && "ring-2 ring-orange-logo/70 bg-orange-logo/[0.06]"
       )}
-      title={folder.name}
     >
       <div className="flex items-start gap-3">
         <span className="flex items-center justify-center w-11 h-11 rounded-xl bg-orange-logo/[0.09] text-orange-logo shrink-0">
@@ -951,7 +949,6 @@ function FileCard({
       }}
       onDoubleClick={onOpen}
       className="group relative rounded-xl border border-marine-profond/[0.08] bg-white p-3 cursor-pointer transition-all hover:border-orange-logo/40 hover:shadow-[0_4px_16px_rgba(224,127,10,0.12)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-logo/50"
-      title={doc.name}
     >
       <div className="flex items-start gap-3">
         <span className={cn("flex items-center justify-center w-11 h-11 rounded-xl shrink-0", meta.tone)}>
@@ -1042,7 +1039,6 @@ function FolderRow({
         "group relative flex items-center gap-3 rounded-lg border border-marine-profond/[0.07] bg-white px-3 py-2.5 cursor-pointer transition-all hover:border-orange-logo/40 hover:shadow-[0_2px_10px_rgba(224,127,10,0.1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-logo/50",
         dropActive && "ring-2 ring-orange-logo/70 bg-orange-logo/[0.06]"
       )}
-      title={folder.name}
     >
       <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-orange-logo/[0.09] text-orange-logo shrink-0">
         <Folder className="w-5 h-5" aria-hidden />
@@ -1094,7 +1090,6 @@ function FileRow({
       }}
       onDoubleClick={onOpen}
       className="group relative flex items-center gap-3 rounded-lg border border-marine-profond/[0.07] bg-white px-3 py-2.5 cursor-pointer transition-all hover:border-orange-logo/40 hover:shadow-[0_2px_10px_rgba(224,127,10,0.1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-logo/50"
-      title={doc.name}
     >
       <span className={cn("flex items-center justify-center w-9 h-9 rounded-lg shrink-0", meta.tone)}>
         <Icon className="w-5 h-5" aria-hidden />

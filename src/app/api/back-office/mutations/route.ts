@@ -4,12 +4,31 @@ import { getSession } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { buildBoSnapshot } from "@/lib/back-office/snapshot";
 import fs from "fs/promises";
+import fsSync from "fs";
 import path from "path";
 import { randomUUID } from "crypto";
 
 export const dynamic = "force-dynamic";
 
-const UPLOAD_DIR = path.join(process.cwd(), "upload", "bo-files");
+/** Répertoire des fichiers : fonctionne quel que soit le répertoire de
+ *  travail (dev, build standalone lancé depuis la racine du projet…). */
+function resolveUploadDir(): string {
+  const candidates = [
+    process.env.BO_UPLOAD_DIR,
+    path.join(process.cwd(), "upload", "bo-files"),
+    path.join(process.cwd(), "..", "upload", "bo-files"),
+    path.join(process.cwd(), "../..", "upload", "bo-files"),
+  ].filter((p): p is string => !!p);
+  for (const c of candidates) {
+    try {
+      if (fsSync.existsSync(c)) return c;
+    } catch {
+      /* continuer */
+    }
+  }
+  return candidates[0] ?? path.join(process.cwd(), "upload", "bo-files");
+}
+const UPLOAD_DIR = resolveUploadDir();
 
 interface IncomingMutation {
   id: string;

@@ -1,0 +1,162 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma-sqlite"
+}
+
+datasource db {
+  provider  = "sqlite"
+  url       = env("BO_FALLBACK_URL")
+}
+
+// ─────────────────────────────────────────────────────────────
+// BACK-OFFICE — Authentification
+// ─────────────────────────────────────────────────────────────
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String
+  name         String
+  role         String    @default("ADMIN") // ADMIN | GESTIONNAIRE | LECTEUR
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}
+
+// ─────────────────────────────────────────────────────────────
+// BACK-OFFICE CABINET — Clients (ONG distinctes des autres clients)
+// Les dossiers de travail forment une arborescence LIBRE (exactement
+// comme l'explorateur de fichiers Windows) : dossiers imbriqués sans
+// limite de profondeur, noms libres, fichiers rangés dans les dossiers.
+// ─────────────────────────────────────────────────────────────
+
+model Client {
+  id          String       @id @default(cuid())
+  type        String // "ONG" | "ENTREPRISE"
+  name        String
+  sector      String? // Santé, Éducation, Microfinance, Commerce…
+  contactName String?
+  email       String?
+  phone       String?
+  address     String?
+  taxId       String? // IFU / N° contribuable
+  status      String       @default("ACTIF") // ACTIF | SUSPENDU | ARCHIVE
+  notes       String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  folders     Folder[]
+  workItems   WorkItem[]
+}
+
+model Folder {
+  id        String     @id @default(cuid())
+  clientId  String
+  client    Client     @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  parentId  String? // null = niveau racine du dossier client
+  parent    Folder?    @relation("FolderTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children  Folder[]   @relation("FolderTree")
+  name      String // libre — aucune contrainte de nomenclature
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  documents Document[]
+}
+
+model WorkItem {
+  id           String     @id @default(cuid())
+  clientId     String
+  client       Client     @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  title        String
+  category     String     @default("TENUE") // TENUE | FISCALITE | CERTIFICATION | SOCIAL | CONSEIL | URGENCE | DIVERS
+  status       String     @default("EN_COURS") // A_FAIRE | EN_COURS | EN_REVISION | TERMINE
+  priority     String     @default("NORMALE") // BASSE | NORMALE | HAUTE | URGENTE
+  dueDate      DateTime?
+  notes        String?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  documents    Document[]
+}
+
+model Document {
+  id           String      @id @default(cuid())
+  name         String
+  kind         String // "SHEET" (tableur) | "DOC" (document) | "FILE" (fichier importé)
+  entity       String      @default("CABINET") // CABINET | ACADEMY
+  mimeType     String?
+  size         Int?
+  content      String? // JSON grille (SHEET) ou HTML (DOC)
+  filePath     String? // chemin relatif sous upload/bo-files (FILE)
+  source       String      @default("INTERNE") // INTERNE | IMPORT
+  version      Int         @default(1)
+  folderId     String? // dossier de rangement (arborescence libre)
+  folder       Folder?     @relation(fields: [folderId], references: [id], onDelete: Cascade)
+  workItemId   String?
+  workItem     WorkItem?   @relation(fields: [workItemId], references: [id], onDelete: SetNull)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+}
+
+// ─────────────────────────────────────────────────────────────
+// BACK-OFFICE — Boîte de réception (connectée aux formulaires du site public)
+// ─────────────────────────────────────────────────────────────
+
+model Submission {
+  id        String   @id @default(cuid())
+  source    String // CONTACT_CABINET | RDV_CABINET | INSCRIPTION_ACADEMY
+  entity    String // CABINET | ACADEMY
+  name      String?
+  email     String?
+  phone     String?
+  payload   String // JSON des données du formulaire
+  status    String   @default("NOUVEAU") // NOUVEAU | TRAITE | ARCHIVE
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ─────────────────────────────────────────────────────────────
+// BACK-OFFICE ACADEMY — Contenus connectés au site public
+// ─────────────────────────────────────────────────────────────
+
+model Formation {
+  id          String   @id @default(cuid())
+  title       String
+  hook        String?
+  description String?
+  category    String   @default("FORMATION_COURTE") // FILIERE | FORMATION_COURTE
+  duration    String?
+  price       String?
+  level       String?
+  skills      String // JSON : liste de compétences
+  outcome     String?
+  status      String   @default("PUBLIE") // BROUILLON | PUBLIE
+  order       Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Article {
+  id          String    @id @default(cuid())
+  title       String
+  slug        String    @unique
+  legacyId    Int? // conserve les anciens liens /blog/1, /blog/2…
+  excerpt     String?
+  content     String? // Markdown
+  category    String?
+  readTime    String?
+  status      String    @default("BROUILLON") // BROUILLON | PUBLIE
+  publishedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model Testimonial {
+  id        String   @id @default(cuid())
+  name      String
+  role      String?
+  entity    String // CABINET | ACADEMY
+  content   String
+  result    String? // Résultat clé mis en avant sur la carte publique
+  rating    Int      @default(5)
+  status    String   @default("PUBLIE") // BROUILLON | PUBLIE
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

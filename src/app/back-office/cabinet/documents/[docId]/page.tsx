@@ -107,7 +107,7 @@ export default async function DocumentEditorPage({
 
       {doc.kind === "SHEET" && (
         <>
-          <BoPageHeader eyebrow="Éditeur Excel" title="Classeur Excel" description="Vrai fichier .xlsx — formules complètes (400+ fonctions), feuilles multiples, formats. S'ouvre dans Microsoft Excel, Google Sheets et LibreOffice." />
+          <BoPageHeader eyebrow="Éditeur Excel" title={doc.name} />
           {meta}
           <UniverSheetEditor
             documentId={doc.id}
@@ -120,7 +120,7 @@ export default async function DocumentEditorPage({
 
       {doc.kind === "DOC" && (
         <>
-          <BoPageHeader eyebrow="Éditeur de document" title="Document de travail" description="Rédaction riche : titres, listes, citations. Export PDF prêt à envoyer et Word compatible Google Docs." />
+          <BoPageHeader eyebrow="Éditeur de document" title={doc.name} />
           {meta}
           <DocumentEditor
             documentId={doc.id}
@@ -133,11 +133,7 @@ export default async function DocumentEditorPage({
       {/* Fichier Excel importé (.xlsx) → édition directe du VRAI fichier */}
       {doc.kind === "FILE" && isXlsx(doc) && (
         <>
-          <BoPageHeader
-            eyebrow="Fichier Excel importé"
-            title="Classeur Excel"
-            description="Le fichier original s'ouvre ici avec ses formules et formats d'origine — les modifications l'enregistrent en tant que vrai fichier .xlsx."
-          />
+          <BoPageHeader eyebrow="Fichier Excel" title={doc.name} />
           {meta}
           <UniverSheetEditor
             documentId={doc.id}
@@ -151,7 +147,7 @@ export default async function DocumentEditorPage({
       {/* Fichier non-Excel importé (PDF, image…) → visionnage */}
       {doc.kind === "FILE" && !isXlsx(doc) && (
         <>
-          <BoPageHeader eyebrow="Fichier importé" title={doc.name} description="Fichier du dossier client — téléchargeable à tout moment." />
+          <BoPageHeader eyebrow="Fichier importé" title={doc.name} />
           {meta}
           <FileViewer
             documentId={doc.id}

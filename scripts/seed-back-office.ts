@@ -2,14 +2,18 @@
  * Seed du back-office Groupe SERMA.
  * Exécution : bun scripts/seed-back-office.ts
  * Idempotent : réinitialise les tables métier, préserve la DB SQLite.
+ *
+ * ⚠️ À lancer sur la base LOCALE (SQLite de démonstration) — jamais sur
+ * la base Neon de production : elle contient les vraies données du cabinet.
+ * Variables : BO_FALLBACK_URL (ou DATABASE_URL) → URL file:… de la base.
  */
-import { PrismaClient } from "@prisma/client";
+import prismaDefault from "../src/lib/prisma";
 import bcrypt from "bcryptjs";
 import fs from "fs";
 import path from "path";
 import articlesMd from "./articles-md.json";
 
-const prisma = new PrismaClient();
+const prisma = prismaDefault as { [k: string]: any };
 
 // ── Compte administrateur ────────────────────────────────────
 // Mot de passe lu depuis l'environnement (jamais versionné) :
