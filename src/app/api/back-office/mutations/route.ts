@@ -302,8 +302,9 @@ async function applyMutation(m: IncomingMutation): Promise<void> {
       const existing = await prisma.document.findUnique({ where: { id } });
       if (!existing) throw new Error("Document introuvable.");
 
-      // Fichier réel (.xlsx) joint à la sauvegarde → écrit sur le disque
-      // et référencé par le document (vrai fichier Excel téléchargeable).
+      // Fichier réel joint à la sauvegarde (.xlsx tableur ou .docx document
+      // Word) → écrit sur le disque et référencé par le document (vrai
+      // fichier Microsoft téléchargeable, extension selon le type MIME).
       let filePath: string | undefined;
       let size: number | undefined;
       let mimeType: string | undefined;
@@ -312,10 +313,17 @@ async function applyMutation(m: IncomingMutation): Promise<void> {
         if (buffer.length > 20 * 1024 * 1024) {
           throw new Error("Fichier trop volumineux (20 Mo maximum).");
         }
+        const declaredMime = optS(p.mimeType) || "";
+        const isWord = declaredMime.includes("wordprocessingml");
+        const isExcel =
+          declaredMime.includes("spreadsheetml") || declaredMime.includes("ms-excel");
+        const ext = isWord ? ".docx" : isExcel ? ".xlsx" : "";
         const displayName = (optS(p.name) || existing.name).replace(/[\/\\\0]/g, "_");
-        const safeName = /\.xlsx?$/i.test(displayName)
-          ? displayName
-          : `${displayName}.xlsx`;
+        const safeName = ext
+          ? new RegExp(`\\${ext}$`, "i").test(displayName)
+            ? displayName
+            : `${displayName}${ext}`
+          : displayName;
         const storedName = `${randomUUID()}-${safeName}`;
         await fs.mkdir(UPLOAD_DIR, { recursive: true });
         await fs.writeFile(path.join(UPLOAD_DIR, storedName), buffer);
@@ -328,7 +336,7 @@ async function applyMutation(m: IncomingMutation): Promise<void> {
         filePath = storedName;
         size = buffer.length;
         mimeType =
-          optS(p.mimeType) ||
+          declaredMime ||
           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
       }
 

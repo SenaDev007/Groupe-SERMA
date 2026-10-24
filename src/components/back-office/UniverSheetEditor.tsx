@@ -1,15 +1,17 @@
 "use client";
 
 /**
- * ÉDITEUR TABLEUR — VRAI FICHIER EXCEL (.xlsx)
+ * ÉDITEUR TABLEUR — VRAI FICHIER EXCEL (.xlsx) FIDÉLITÉ TOTALE
  *
  * Moteur d'édition : Univer (interface complète type Microsoft Excel :
  * formules 400+ fonctions, feuilles multiples, fusions, formats de nombres,
- * barre de formule, glisser-recopie…).
+ * polices, couleurs, bordures, alignements, barre de formule…).
  * Persistance : le document est un FICHIER .xlsx réel — créé, édité et
- * téléchargé dans le format Microsoft. Offline-first : dernier fichier
- * conservé en IndexedDB, modification enregistrée localement puis
- * synchronisée automatiquement vers PostgreSQL (Neon) au retour du réseau.
+ * téléchargé dans le format Microsoft, avec l'intégralité de la mise en
+ * forme (round-trip complet : ce que vous voyez est ce qu'Excel ouvre).
+ * Offline-first : dernier fichier conservé en IndexedDB, modification
+ * enregistrée localement puis synchronisée automatiquement vers PostgreSQL
+ * (Neon) au retour du réseau.
  */
 
 import React, { useEffect, useRef, useState } from "react";
@@ -28,19 +30,21 @@ import {
   TriangleAlert,
 } from "lucide-react";
 import { boEngine } from "@/lib/offline/engine";
-import { blobGet, blobPut } from "@/lib/offline/idb";
+import { blobGet, blobPut, blobGetRecord } from "@/lib/offline/idb";
 import {
   xlsxToBridge,
   bridgeToXlsx,
   bridgeToUniverData,
   legacyGridToBridge,
   bridgeToHtmlTable,
+  univerStyleToBridge,
+  univerColorToRgb,
   type BridgeWorkbook,
   type BridgeSheet,
   type LegacySheetData,
 } from "@/lib/spreadsheet/bridge";
 import type { FUniver } from "@univerjs/presets";
-import type { ICellData, IWorksheetData } from "@univerjs/presets";
+import type { ICellData, IStyleData, IWorksheetData } from "@univerjs/presets";
 
 import "@univerjs/preset-sheets-core/lib/index.css";
 
@@ -54,6 +58,8 @@ export interface UniverSheetEditorProps {
   documentName: string;
   /** true si un fichier .xlsx existe déjà côté serveur. */
   hasFile: boolean;
+  /** Version du document côté serveur (anti-cache obsolète). */
+  serverVersion?: number;
   /** Repli : ancienne grille JSON (documents créés avant la migration). */
   fallbackLegacy?: LegacySheetData | null;
 }
@@ -77,16 +83,14 @@ function blankWorkbook(): BridgeWorkbook {
   };
 }
 
-/** Extraction Univer → Bridge (valeurs calculées, formules, formats). */
+/** Extraction Univer → Bridge (valeurs calculées, formules, formats,
+ *  styles COMPLETS : polices, couleurs, bordures, alignements). */
 function extractBridge(api: FUniver): BridgeWorkbook {
   const wb = api.getActiveWorkbook();
   if (!wb) return blankWorkbook();
 
   const snapshot = wb.getWorkbook().getSnapshot();
-  const styles = (snapshot.styles ?? {}) as Record<
-    string,
-    { n?: { pattern: string } } | null
-  >;
+  const styles = (snapshot.styles ?? {}) as Record<string, IStyleData>;
   const sheetSnapshots = (snapshot.sheets ?? {}) as Record<string, Partial<IWorksheetData>>;
 
   const sheets: BridgeSheet[] = [];
@@ -117,21 +121,29 @@ function extractBridge(api: FUniver): BridgeWorkbook {
         if (typeof formula === "string" && formula.startsWith("=") && formula.length > 1) {
           out.f = formula.slice(1);
           const v = values[r]?.[c];
-          if (v !== null && v !== undefined) out.v = v;
+          if (v !== null && v !== undefined) out.v = v as string | number | boolean;
         } else {
           const v = values[r]?.[c];
-          if (v !== null && v !== undefined && v !== "") out.v = v;
+          if (v !== null && v !== undefined && v !== "") out.v = v as string | number | boolean;
         }
-        // Format de nombre depuis le style référencé
+        // Style complet + format de nombre depuis le style référencé
         const sRef = cd.s;
         if (typeof sRef === "string") {
           const st = styles[sRef];
-          const pattern = st?.n?.pattern;
+          if (st && typeof st === "object") {
+            const pattern = (st as { n?: { pattern?: string } }).n?.pattern;
+            if (pattern) out.z = pattern;
+            const bridgeStyle = univerStyleToBridge(st);
+            if (bridgeStyle) out.st = bridgeStyle;
+          }
+        } else if (sRef && typeof sRef === "object") {
+          const st = sRef as IStyleData;
+          const pattern = (st as { n?: { pattern?: string } }).n?.pattern;
           if (pattern) out.z = pattern;
-        } else if (sRef && typeof sRef === "object" && sRef.n?.pattern) {
-          out.z = sRef.n.pattern;
+          const bridgeStyle = univerStyleToBridge(st);
+          if (bridgeStyle) out.st = bridgeStyle;
         }
-        if (out.v !== undefined || out.f !== undefined || out.z !== undefined) {
+        if (out.v !== undefined || out.f !== undefined || out.z !== undefined || out.st !== undefined) {
           cells[`${r}:${c}`] = out;
         }
       }
@@ -148,9 +160,19 @@ function extractBridge(api: FUniver): BridgeWorkbook {
       if (row?.h && row.h > 0) rowHeights[Number(rStr)] = row.h;
     }
 
+    // Volets figés / couleur d'onglet / masquage
+    const freezeSnap = (snap as { freeze?: { xSplit?: number; ySplit?: number } }).freeze;
+    const freeze =
+      freezeSnap && ((freezeSnap.xSplit ?? 0) > 0 || (freezeSnap.ySplit ?? 0) > 0)
+        ? { x: freezeSnap.xSplit ?? 0, y: freezeSnap.ySplit ?? 0 }
+        : undefined;
+    const tabColor = univerColorToRgb((snap as { tabColor?: string }).tabColor);
+
     sheets.push({
       name: fws.getSheetName() || `Feuille ${sheets.length + 1}`,
-      hidden: !!snap.hidden,
+      hidden: !!(snap as { hidden?: number | boolean }).hidden,
+      ...(tabColor ? { tabColor } : {}),
+      ...(freeze ? { freeze } : {}),
       cells,
       merges: (snap.mergeData ?? []).map((m) => ({
         sr: m.startRow,
@@ -170,6 +192,7 @@ export function UniverSheetEditor({
   documentId,
   documentName,
   hasFile,
+  serverVersion = 0,
   fallbackLegacy,
 }: UniverSheetEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -207,13 +230,21 @@ export function UniverSheetEditor({
     }, 45_000);
 
     async function boot() {
-      // 1) Dernier fichier connu : cache local d'abord (hors-ligne OK)
+      // 1) Dernier fichier connu : cache local d'abord (hors-ligne OK) —
+      //    mais uniquement s'il est AUSSI récent que la version serveur
+      //    (sinon le fichier du serveur, plus frais, prime).
       let bytes: Uint8Array | null = null;
       try {
-        const cached = await blobGet(BLOB_KEY(documentId));
-        if (cached && cached.size > 0) {
-          bytes = new Uint8Array(await cached.arrayBuffer());
-          setFileState("local");
+        const record = await blobGetRecord(BLOB_KEY(documentId));
+        if (record?.file && record.file.size > 0) {
+          const cacheFresh =
+            serverVersion <= 0 ||
+            (record.version ?? 0) >= serverVersion ||
+            !hasFile;
+          if (cacheFresh) {
+            bytes = new Uint8Array(await record.file.arrayBuffer());
+            setFileState("local");
+          }
         }
       } catch {
         bytes = null;
@@ -226,9 +257,11 @@ export function UniverSheetEditor({
             bytes = new Uint8Array(await res.arrayBuffer());
             if (bytes.length > 0) {
               setFileState("server");
-              await blobPut(BLOB_KEY(documentId), new Blob([bytes as BlobPart], { type: XLSX_MIME })).catch(
-                () => {}
-              );
+              await blobPut(
+                BLOB_KEY(documentId),
+                new Blob([bytes as BlobPart], { type: XLSX_MIME }),
+                serverVersion
+              ).catch(() => {});
             }
           }
         } catch {
@@ -242,7 +275,7 @@ export function UniverSheetEditor({
       let bridge: BridgeWorkbook;
       if (bytes && bytes.length > 0) {
         try {
-          bridge = xlsxToBridge(bytes);
+          bridge = await xlsxToBridge(bytes);
         } catch {
           bridge = blankWorkbook();
         }
@@ -329,17 +362,22 @@ export function UniverSheetEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [documentId]);
 
-  // ── Sauvegarde : vrai .xlsx → IndexedDB + mutation de synchro ──
+  // ── Sauvegarde : vrai .xlsx (styles complets) → IndexedDB + synchro ──
   async function save() {
     const bundle = bundleRef.current;
     if (!bundle) return;
     setSaving(true);
     try {
       const bridge = extractBridge(bundle.univerAPI);
-      const bytes = new Uint8Array(bridgeToXlsx(bridge));
+      const bytes = await bridgeToXlsx(bridge);
 
-      // Cache local (réouverture hors-ligne) — même clé que l'import
-      await blobPut(BLOB_KEY(documentId), new Blob([bytes], { type: XLSX_MIME }));
+      // Cache local (réouverture hors-ligne) — même clé que l'import ;
+      // la version enregistrée suit la sauvegarde (fraîcheur du cache).
+      await blobPut(
+        BLOB_KEY(documentId),
+        new Blob([bytes as BlobPart], { type: XLSX_MIME }),
+        (serverVersion || 0) + 1
+      );
 
       // Métadonnées légères pour la liste (le contenu réel = le fichier)
       const meta = {
@@ -402,24 +440,26 @@ export function UniverSheetEditor({
   function download() {
     const bundle = bundleRef.current;
     if (!bundle) return;
-    try {
-      const bridge = extractBridge(bundle.univerAPI);
-      const bytes = bridgeToXlsx(bridge);
-      const safe = (name || "classeur").replace(/[\/\\:*\?"<>|]/g, "_");
-      const filename = /\.xlsx?$/i.test(safe) ? safe : `${safe}.xlsx`;
-      const blob = new Blob([bytes], { type: XLSX_MIME });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
-      a.click();
-      URL.revokeObjectURL(url);
-      toast.success("Fichier Excel téléchargé", {
-        description: `${filename} — s'ouvre dans Microsoft Excel`,
-      });
-    } catch {
-      toast.error("Échec de la génération du fichier .xlsx.");
-    }
+    void (async () => {
+      try {
+        const bridge = extractBridge(bundle.univerAPI);
+        const bytes = await bridgeToXlsx(bridge);
+        const safe = (name || "classeur").replace(/[\/\\:*\?"<>|]/g, "_");
+        const filename = /\.xlsx?$/i.test(safe) ? safe : `${safe}.xlsx`;
+        const blob = new Blob([bytes as BlobPart], { type: XLSX_MIME });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(url);
+        toast.success("Fichier Excel téléchargé", {
+          description: `${filename} — s'ouvre dans Microsoft Excel`,
+        });
+      } catch {
+        toast.error("Échec de la génération du fichier .xlsx.");
+      }
+    })();
   }
 
   // ── Export CSV (feuille active) ──

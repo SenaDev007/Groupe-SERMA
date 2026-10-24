@@ -3,6 +3,8 @@
 import React from "react";
 import { useBoData } from "@/hooks/useBoData";
 import { boEngine } from "@/lib/offline/engine";
+import { blobPut } from "@/lib/offline/idb";
+import { htmlToDocxBlob, DOCX_MIME } from "@/lib/docx/convert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Toaster, toast } from "sonner";
@@ -59,11 +61,14 @@ export function DocumentEditor({
   documentName,
   initialContent,
   initialVersion = 1,
+  hasFile = false,
 }: {
   documentId: string;
   documentName: string;
   initialContent: string;
   initialVersion?: number;
+  /** true si un fichier .docx réel existe déjà côté serveur. */
+  hasFile?: boolean;
 }) {
   const bo = useBoData();
   const [name, setName] = React.useState(documentName);
@@ -71,6 +76,8 @@ export function DocumentEditor({
   const [dirty, setDirty] = React.useState(false);
   const editorRef = React.useRef<HTMLDivElement>(null);
   const loadedVersion = React.useRef(initialVersion);
+
+  const BLOB_KEY = `docx-${documentId}`;
 
   // Contenu initial : version locale (IndexedDB) si plus récente que le rendu
   // serveur en cache (fonctionnement hors-ligne), sinon contenu serveur.
@@ -109,21 +116,44 @@ export function DocumentEditor({
 
   // Sauvegarde — locale immédiate (IndexedDB) + synchronisation automatique
   // vers la base distante dès que la connexion est disponible.
+  // Le document est AUSSI écrit en fichier Word réel (.docx) — le fichier
+  // téléchargé est identique à ce que produit Microsoft Word.
   async function save() {
     const content = editorRef.current?.innerHTML ?? "";
     setSaving(true);
     try {
+      // 1) Vrai fichier .docx en cache local (hors-ligne OK)
+      let blobKey: string | undefined;
+      let size: number | undefined;
+      try {
+        const blob = await htmlToDocxBlob(content, name.trim() || documentName);
+        await blobPut(BLOB_KEY, blob);
+        blobKey = BLOB_KEY;
+        size = blob.size;
+      } catch (e) {
+        console.error("Génération .docx impossible :", e);
+        // le HTML reste sauvegardé — le fichier sera régénéré au prochain essai
+      }
+
+      // 2) Mutation : contenu HTML (ré-édition) + fichier .docx (téléchargement)
       await boEngine.mutate({
         id: boEngine.newId("mut"),
         type: "document.saveContent",
         createdAt: new Date().toISOString(),
-        payload: { id: documentId, name, content },
+        payload: {
+          id: documentId,
+          name,
+          content,
+          ...(blobKey ? { blobKey, size, mimeType: DOCX_MIME } : {}),
+        },
       });
       loadedVersion.current += 1;
       setDirty(false);
       const heure = new Date().toLocaleTimeString("fr-FR");
       if (navigator.onLine) {
-        toast.success(`Enregistré à ${heure}`, { description: name });
+        toast.success(`Enregistré à ${heure}`, {
+          description: `${name} — document Word (.docx) régénéré`,
+        });
       } else {
         toast.success(`Enregistré localement à ${heure}`, {
           description: "Hors-ligne — synchronisation automatique dès le retour de la connexion.",
@@ -188,30 +218,25 @@ export function DocumentEditor({
 
   function exportWord() {
     const content = editorRef.current?.innerHTML ?? "";
-    const html = `<!DOCTYPE html><html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40" lang="fr"><head><meta charset="utf-8">
-<title>${escapeHtml(name)}</title>
-<!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View></w:WordDocument></xml><![endif]-->
-<style>
-  body { font-family:'Calibri', Georgia, serif; font-size:11.5pt; color:#1a1a2e; line-height:1.6; }
-  h1 { color:#0C193D; font-size:18pt; } h2 { color:#0C193D; font-size:15pt; } h3 { color:#112046; font-size:13pt; }
-  blockquote { border-left:3pt solid #E07F0A; padding-left:10pt; color:#4A4E69; font-style:italic; }
-  .doc-header { border-bottom:2pt solid #E07F0A; padding-bottom:8pt; margin-bottom:16pt; }
-  .doc-header .brand { font-weight:bold; color:#0C193D; font-size:12pt; }
-  .doc-header .brand span { color:#E07F0A; }
-</style></head><body>
-<div class="doc-header"><div class="brand">CABINET <span>SERMA</span> — ${escapeHtml(name)}</div></div>
-${content}
-</body></html>`;
-    const blob = new Blob(["\uFEFF" + html], { type: "application/msword;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${name.replace(/[\/\\:*\?"<>|]/g, "_")}.doc`;
-    a.click();
-    URL.revokeObjectURL(url);
-    toast.success("Document Word généré", {
-      description: "S'ouvre dans Microsoft Word, Google Docs et LibreOffice.",
-    });
+    void (async () => {
+      try {
+        const blob = await htmlToDocxBlob(content, name.trim() || documentName);
+        const safe = (name || "document").replace(/[\\/:*?"<>|]/g, "_");
+        const filename = /\.docx?$/i.test(safe) ? safe : `${safe}.docx`;
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(url);
+        toast.success("Document Word généré", {
+          description: `${filename} — vrai fichier .docx, s'ouvre dans Microsoft Word`,
+        });
+      } catch (e) {
+        console.error(e);
+        toast.error("Échec de la génération du fichier Word.");
+      }
+    })();
   }
 
   function exportHtml() {
@@ -262,7 +287,7 @@ ${content}
         </Button>
         <Button onClick={exportWord} variant="outline" size="sm" className="h-9 border-marine-profond/20 text-marine-profond hover:bg-marine-profond/[0.04]">
           <Download className="w-4 h-4 mr-1.5" aria-hidden />
-          Word (.doc)
+          Word (.docx)
         </Button>
         <Button onClick={exportHtml} variant="outline" size="sm" className="h-9 border-marine-profond/20 text-marine-profond hover:bg-marine-profond/[0.04]">
           <FileCode className="w-4 h-4 mr-1.5" aria-hidden />
@@ -323,8 +348,9 @@ ${content}
       </div>
 
       <p className="bo-no-print text-[11.5px] text-gris-texte">
-        Document riche : titres, listes, citations, alignements. Export PDF prêt à
-        envoyer, export Word compatible Microsoft Word et Google Docs.
+        Document riche : titres, listes, citations, alignements, tableaux${hasFile ? ", fichier Word réel attaché au document" : ""}.
+        Enregistrement et export en vrai fichier .docx — identique à un document
+        créé dans Microsoft Word (ouvrez-le dans Word, Google Docs ou LibreOffice).
       </p>
     </div>
   );

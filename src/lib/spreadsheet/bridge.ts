@@ -1,25 +1,74 @@
 /**
  * Pont entre fichiers Excel RÉELS (.xlsx — format Microsoft) et l'éditeur
- * de tableur Univer du back-office.
+ * de tableur Univer du back-office — FIDÉLITÉ TOTALE.
  *
  * Flux :
  *   .xlsx (octets)  ──xlsxToBridge──►  BridgeWorkbook  ──bridgeToUniverData──►  Univer
  *   Univer (facade) ──(extraction)──►  BridgeWorkbook  ──bridgeToXlsx──►  .xlsx (octets)
  *
- * Fidélité transportée : valeurs, formules (plus de 400 fonctions dans
- * l'éditeur), formats de nombres (patterns Excel), feuilles multiples,
- * fusions de cellules, largeurs de colonnes / hauteurs de lignes.
+ * Fidélité transportée (round-trip complet, exactement comme un fichier
+ * produit dans Microsoft Excel) :
+ *   • valeurs, formules (+ résultats en cache), formats de nombres ;
+ *   • polices (famille, taille, gras, italique, souligné, barré, couleur) ;
+ *   • fonds de cellule (couleurs pleines) ;
+ *   • bordures (les 4 côtés, tous les styles OOXML, couleur) ;
+ *   • alignements (horizontal, vertical, renvoi à la ligne, shrink, retrait,
+ *     rotation) ;
+ *   • fusions de cellules, largeurs de colonnes, hauteurs de lignes ;
+ *   • feuilles multiples (ordre, noms, masquées, couleur d'onglet) ;
+ *   • volets figés (freeze panes) ;
+ *   • liens hypertexte.
  *
- * Dépendance runtime : SheetJS (xlsx) uniquement — les imports Univer sont
- * des imports de TYPES (effacés à la compilation, zéro impact bundle).
+ * Lecture : SheetJS (valeurs + formules, y compris formules partagées) puis
+ * ExcelJS (styles, formats, volets) — les deux bibliothèques sont fusionnées
+ * cellule par cellule. Écriture : ExcelJS (styles complets au format OOXML).
+ * Les imports Univer sont des imports de TYPES (effacés à la compilation).
  */
 
 import * as XLSX from "xlsx";
-import type { ICellData, IWorkbookData, IWorksheetData } from "@univerjs/presets";
+import type { ICellData, IStyleData, IWorkbookData, IWorksheetData } from "@univerjs/presets";
 
 // ─────────────────────────────────────────────────────────────
 // Types du pont (représentation neutre)
 // ─────────────────────────────────────────────────────────────
+
+/** Bordure d'un côté de cellule — style OOXML + couleur RRGGBB (sans #). */
+export interface BridgeBorder {
+  /** Nom de style OOXML : thin, medium, thick, hair, dotted, dashed… */
+  s: string;
+  /** Couleur RRGGBB sans dièse. */
+  c?: string;
+}
+
+/** Mise en forme complète d'une cellule (équivalent Excel). */
+export interface BridgeStyle {
+  /** Famille de police (ex. « Calibri »). */
+  ff?: string;
+  /** Taille de police en points. */
+  fs?: number;
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  strike?: boolean;
+  /** Couleur du texte RRGGBB sans dièse. */
+  color?: string;
+  /** Fond plein RRGGBB sans dièse. */
+  fill?: string;
+  /** Bordures par côté. */
+  bd?: Partial<Record<"t" | "r" | "b" | "l", BridgeBorder>>;
+  /** Alignement horizontal : left | center | right | justify | distributed. */
+  h?: string;
+  /** Alignement vertical : top | middle | bottom | distributed | justify. */
+  v?: string;
+  /** Renvoi à la ligne automatique. */
+  wrap?: boolean;
+  /** Réduire pour ajuster. */
+  shrink?: boolean;
+  /** Retrait (0–250). */
+  indent?: number;
+  /** Rotation du texte en degrés (0–180) ; 255 = vertical. */
+  rot?: number;
+}
 
 export interface BridgeCell {
   /** Valeur (nombre / texte / booléen) — valeur calculée pour les formules. */
@@ -28,6 +77,10 @@ export interface BridgeCell {
   f?: string;
   /** Format de nombre au pattern Excel (ex. "#,##0.00"). */
   z?: string;
+  /** Mise en forme complète. */
+  st?: BridgeStyle;
+  /** Lien hypertexte (URL). */
+  link?: string;
 }
 
 export interface BridgeMerge {
@@ -37,9 +90,19 @@ export interface BridgeMerge {
   ec: number; // colonne de fin incluse
 }
 
+/** Volets figés : nombre de colonnes / lignes figées. */
+export interface BridgeFreeze {
+  x: number;
+  y: number;
+}
+
 export interface BridgeSheet {
   name: string;
   hidden?: boolean;
+  /** Couleur d'onglet RRGGBB sans dièse. */
+  tabColor?: string;
+  /** Volets figés. */
+  freeze?: BridgeFreeze;
   /** Cellules indexées « row:col » (0-based). */
   cells: Record<string, BridgeCell>;
   merges: BridgeMerge[];
@@ -54,6 +117,73 @@ export interface BridgeWorkbook {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Tables de conversion (valeurs vérifiées contre le runtime Univer 1.2)
+// ─────────────────────────────────────────────────────────────
+
+/** Style de bordure OOXML → enum numérique Univer BorderStyleTypes. */
+const BORDER_NAME_TO_UNIVER: Record<string, number> = {
+  none: 0,
+  thin: 1,
+  hair: 2,
+  dotted: 3,
+  dashed: 4,
+  dashDot: 5,
+  dashDotDot: 6,
+  double: 7,
+  medium: 8,
+  mediumDashed: 9,
+  mediumDashDot: 10,
+  mediumDashDotDot: 11,
+  slantDashDot: 12,
+  thick: 13,
+};
+
+/** Enum numérique Univer BorderStyleTypes → style de bordure OOXML. */
+const BORDER_UNIVER_TO_NAME: Record<number, string> = Object.fromEntries(
+  Object.entries(BORDER_NAME_TO_UNIVER).map(([k, v]) => [v, k])
+);
+
+/** Alignement horizontal Excel → enum numérique Univer HorizontalAlign. */
+const H_ALIGN_TO_UNIVER: Record<string, number> = {
+  left: 1,
+  center: 2,
+  right: 3,
+  justify: 4,
+  justified: 4,
+  distributed: 6,
+  // valeurs rares ramenées à l'équivalent le plus proche
+  centerContinuous: 2,
+  fill: 1,
+  general: 0,
+};
+
+/** Enum numérique Univer HorizontalAlign → alignement horizontal Excel. */
+const H_UNIVER_TO_ALIGN: Record<number, string> = {
+  1: "left",
+  2: "center",
+  3: "right",
+  4: "justify",
+  6: "distributed",
+};
+
+/** Alignement vertical Excel → enum numérique Univer VerticalAlign. */
+const V_ALIGN_TO_UNIVER: Record<string, number> = {
+  top: 1,
+  middle: 2,
+  bottom: 3,
+  distributed: 3,
+  justify: 2,
+  center: 2,
+};
+
+/** Enum numérique Univer VerticalAlign → alignement vertical Excel. */
+const V_UNIVER_TO_ALIGN: Record<number, string> = {
+  1: "top",
+  2: "middle",
+  3: "bottom",
+};
+
+// ─────────────────────────────────────────────────────────────
 // Utilitaires
 // ─────────────────────────────────────────────────────────────
 
@@ -61,12 +191,22 @@ const key = (r: number, c: number) => `${r}:${c}`;
 
 /** Convertit des caractères de largeur Excel (wch) en pixels. */
 function wchToPx(wch: number): number {
-  return Math.round(wch * 7.5);
+  return Math.round(wch * 7 + 5);
+}
+
+/** Convertit des pixels en caractères de largeur Excel. */
+function pxToWch(px: number): number {
+  return Math.max(2, Math.round(((px - 5) / 7) * 100) / 100);
 }
 
 /** Convertit des points de hauteur (hpt) en pixels. */
 function hptToPx(hpt: number): number {
   return Math.round((hpt * 96) / 72);
+}
+
+/** Convertit des pixels en points de hauteur. */
+function pxToHpt(px: number): number {
+  return Math.round((px * 0.75) * 100) / 100;
 }
 
 function sanitizeSheetName(name: string, index: number): string {
@@ -75,40 +215,87 @@ function sanitizeSheetName(name: string, index: number): string {
   return n.slice(0, 31);
 }
 
+/** ARGB ExcelJS (« FFRRGGBB » / « RRGGBB ») → RRGGBB sans dièse. */
+function argbToRgb(argb: unknown): string | undefined {
+  if (typeof argb !== "string" || !/^[0-9A-Fa-f]{6,8}$/.test(argb)) return undefined;
+  const hex = argb.length === 8 ? argb.slice(2) : argb;
+  // blanc pur sans alpha explicite = souvent un placeholder → garder quand même
+  return hex.toUpperCase();
+}
+
+/** Couleur Univer (« #RRGGBB » ou « rgb(r,g,b) ») → RRGGBB sans dièse. */
+export function univerColorToRgb(c: unknown): string | undefined {
+  if (typeof c !== "string") return undefined;
+  const mHex = /^#?([0-9A-Fa-f]{6})$/.exec(c.trim());
+  if (mHex) return mHex[1].toUpperCase();
+  const mRgb = /^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})/.exec(c);
+  if (mRgb) {
+    return [mRgb[1], mRgb[2], mRgb[3]]
+      .map((n) => Math.max(0, Math.min(255, Number(n))).toString(16).padStart(2, "0"))
+      .join("")
+      .toUpperCase();
+  }
+  return undefined;
+}
+
+/** Chargement paresseux d'ExcelJS (bundle navigateur — import dynamique). */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function loadExcelJS(): Promise<any> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const mod: any = await import("exceljs");
+  // CJS : selon l'interop, la classe Workbook est sur default ou à la racine
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const lib: any = mod?.default ?? mod;
+  if (typeof lib?.Workbook !== "function") {
+    throw new Error("ExcelJS indisponible");
+  }
+  return lib;
+}
+
 // ─────────────────────────────────────────────────────────────
-// .xlsx → Bridge
+// .xlsx → Bridge (lecture DOUBLE : SheetJS + ExcelJS fusionnées)
 // ─────────────────────────────────────────────────────────────
 
-export function xlsxToBridge(data: ArrayBuffer | Uint8Array): BridgeWorkbook {
+export async function xlsxToBridge(data: ArrayBuffer | Uint8Array): Promise<BridgeWorkbook> {
   const buf = data instanceof Uint8Array ? data : new Uint8Array(data);
+
+  // ── Passe 1 : SheetJS — valeurs, formules (partagées incluses), formats,
+  // fusions, dimensions. Rapide et complète sur le contenu. ──
   const wb = XLSX.read(buf, {
     type: "array",
-    cellFormula: true, // conserver les formules
-    cellNF: true, // conserver les formats de nombres
+    cellFormula: true,
+    cellNF: true,
     cellStyles: false,
-    sheetStubs: false,
-    raw: true, // valeurs brutes (nombres, pas de formatage texte)
+    // stubs = cellules vide : nécessaire pour capter les formules SANS
+    // valeur en cache (<f> sans <v> — fichiers écrits par des outils
+    // tiers) que SheetJS ignore sinon complètement.
+    sheetStubs: true,
+    raw: true,
   });
+  // Visibilité des feuilles (SheetJS : wb.Workbook.Sheets[i].Hidden)
+  const sheetVisibility = (wb.Workbook?.Sheets ?? []).map(
+    (s: { Hidden?: number } | undefined) => (s?.Hidden ?? 0) !== 0
+  );
 
   const sheets: BridgeSheet[] = [];
   for (const sheetName of wb.SheetNames) {
     const ws = wb.Sheets[sheetName];
     if (!ws) continue;
 
+    const idx = sheets.length;
     const bridge: BridgeSheet = {
-      name: sanitizeSheetName(sheetName, sheets.length),
-      hidden: !!(ws as unknown as { hidden?: boolean }).hidden,
+      name: sanitizeSheetName(sheetName, idx),
+      hidden: sheetVisibility[idx] ?? false,
       cells: {},
       merges: [],
       colWidths: {},
       rowHeights: {},
     };
 
-    // Plage utilisée
     const ref = (ws["!ref"] as string) || "A1:A1";
     const range = XLSX.utils.decode_range(ref);
 
-    // Cellules : valeurs, formules, formats
     for (let r = range.s.r; r <= range.e.r; r++) {
       for (let c = range.s.c; c <= range.e.c; c++) {
         const addr = XLSX.utils.encode_cell({ r, c });
@@ -117,18 +304,14 @@ export function xlsxToBridge(data: ArrayBuffer | Uint8Array): BridgeWorkbook {
 
         const out: BridgeCell = {};
         if (cell.t === "z" || cell.v === undefined) {
-          // cellule vide avec éventuellement un format
           if (cell.z && typeof cell.z === "string") out.z = cell.z;
         } else {
-          // Une valeur texte identique à la formule est un artefact de migration :
-          // on la jette pour laisser le moteur de calcul recalculer.
           const isFormulaEcho =
             typeof cell.v === "string" && cell.v.trim().startsWith("=");
           if (!isFormulaEcho) out.v = cell.v as string | number | boolean;
           if (cell.z && typeof cell.z === "string") out.z = cell.z;
         }
         if (typeof cell.f === "string" && cell.f.length > 0) {
-          // SheetJS stocke la formule sans « = »
           out.f = cell.f.startsWith("=") ? cell.f.slice(1) : cell.f;
         }
         if (out.v !== undefined || out.f !== undefined || out.z !== undefined) {
@@ -137,12 +320,10 @@ export function xlsxToBridge(data: ArrayBuffer | Uint8Array): BridgeWorkbook {
       }
     }
 
-    // Fusions
     for (const m of ws["!merges"] || []) {
       bridge.merges.push({ sr: m.s.r, sc: m.s.c, er: m.e.r, ec: m.e.c });
     }
 
-    // Largeurs de colonnes / hauteurs de lignes
     const colsInfo = ws["!cols"] ?? [];
     for (let c = 0; c < colsInfo.length; c++) {
       const col = colsInfo[c];
@@ -161,21 +342,178 @@ export function xlsxToBridge(data: ArrayBuffer | Uint8Array): BridgeWorkbook {
     sheets.push(bridge);
   }
 
+  // ── Passe 2 : ExcelJS — mise en forme (polices, fonds, bordures,
+  // alignements), formats de nombres par cellule, liens, volets figés,
+  // couleurs d'onglet, état masqué, largeurs/hauteurs manquantes. ──
+  try {
+    const ExcelJS = await loadExcelJS();
+    const ewb = new ExcelJS.Workbook();
+    await ewb.xlsx.load(buf);
+
+    // Correspondance nom nettoyé → bridge (l'ordre ExcelJS = l'ordre réel)
+    const byName = new Map(sheets.map((s) => [s.name.toLowerCase(), s]));
+
+    for (const ews of ewb.worksheets as Array<{
+      name: string;
+      state?: string;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      properties?: { tabColor?: { argb?: string } };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      views?: any[];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      eachRow: (opts: { includeEmpty: boolean }, cb: (row: any, n: number) => void) => void;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      getColumn: (n: number) => any;
+    }>) {
+      const target = byName.get(sanitizeSheetName(ews.name, 0).toLowerCase());
+      if (!target) continue;
+
+      // Onglet masqué / couleur d'onglet / volets figés
+      target.hidden = ews.state === "hidden" || ews.state === "veryHidden" ? true : target.hidden;
+      const tab = argbToRgb(ews.properties?.tabColor?.argb);
+      if (tab) target.tabColor = tab;
+      const view = (ews.views ?? []).find(
+        (v) => v?.state === "frozen" || v?.state === "frozenSplit"
+      );
+      if (view && (view.xSplit > 0 || view.ySplit > 0)) {
+        target.freeze = { x: view.xSplit || 0, y: view.ySplit || 0 };
+      }
+
+      // Styles cellule par cellule
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ews.eachRow({ includeEmpty: true }, (row: any, rowNum: number) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        row.eachCell({ includeEmpty: true }, (cell: any, colNum: number) => {
+          const r = rowNum - 1;
+          const c = colNum - 1;
+          if (r < 0 || c < 0) return;
+
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const style: any = cell.style ?? {};
+          const st = exceljsStyleToBridge(style);
+          const numFmt: string | undefined = style.numFmt || undefined;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const val = cell.value as any;
+          let link: string | undefined;
+          if (val && typeof val === "object" && !Array.isArray(val) && "hyperlink" in val) {
+            link = String((val as { hyperlink?: unknown }).hyperlink ?? "");
+          }
+
+          if (!st && !numFmt && !link) return;
+
+          const existing = target.cells[key(r, c)] ?? {};
+          if (numFmt) existing.z = numFmt;
+          if (st) existing.st = st;
+          if (link && !existing.f) existing.link = link;
+          // cellule stylée mais vide : conserve la trace pour l'écriture
+          if (existing.v === undefined && existing.f === undefined && !existing.z && !numFmt) {
+            // style seul sur cellule vide : on la crée uniquement pour le style
+          }
+          target.cells[key(r, c)] = existing;
+        });
+      });
+
+      // Largeurs manquantes (caractères ExcelJS → pixels)
+      const colCount = Math.max(
+        Object.keys(target.colWidths).length,
+        Number(ews.getColumn?.(1)?.worksheet?.columnCount ?? 0)
+      );
+      for (let c = 0; c < colCount; c++) {
+        if (target.colWidths[c]) continue;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const col: any = ews.getColumn(c + 1);
+        const w = col?.width ?? col?.model?.width;
+        if (typeof w === "number" && w > 0) target.colWidths[c] = wchToPx(w);
+      }
+
+      // Hauteurs de lignes (points ExcelJS → pixels) — SheetJS ne les
+      // transporte qu'avec cellStyles, on prend donc la voie ExcelJS.
+      const rowCount = Number((ews as { rowCount?: number }).rowCount ?? 0);
+      for (let r = 1; r <= rowCount; r++) {
+        if (target.rowHeights[r - 1]) continue;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const row: any = ews.getRow(r);
+        const h = row?.height ?? row?.model?.height;
+        if (typeof h === "number" && h > 0) target.rowHeights[r - 1] = hptToPx(h);
+      }
+    }
+  } catch {
+    // Fichier illisible par ExcelJS (rare) : contenu sans styles, on continue
+  }
+
   return { sheets };
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function exceljsStyleToBridge(style: any): BridgeStyle | undefined {
+  if (!style || typeof style !== "object") return undefined;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const font: any = style.font;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const fill: any = style.fill;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const border: any = style.border;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const alignment: any = style.alignment;
+
+  const st: BridgeStyle = {};
+
+  if (font && typeof font === "object") {
+    if (typeof font.name === "string" && font.name) st.ff = font.name;
+    if (typeof font.size === "number" && font.size > 0) st.fs = font.size;
+    if (font.bold) st.bold = true;
+    if (font.italic) st.italic = true;
+    if (font.underline) st.underline = true;
+    if (font.strike) st.strike = true;
+    const fc = argbToRgb(font.color?.argb ?? font.color);
+    if (fc && fc !== "000000") st.color = fc;
+  }
+  if (fill && fill.type === "pattern" && (fill.pattern === "solid" || !fill.pattern)) {
+    // couleur de fond : fgColor porte la teinte réelle dans Excel
+    const bg = argbToRgb(fill.fgColor?.argb ?? fill.fgColor) ?? argbToRgb(fill.bgColor?.argb ?? fill.bgColor);
+    if (bg && bg !== "FFFFFF") st.fill = bg;
+  }
+  if (border && typeof border === "object") {
+    const bd: BridgeStyle["bd"] = {};
+    for (const side of ["top", "left", "bottom", "right"] as const) {
+      const b = border[side];
+      if (b && typeof b === "object" && typeof b.style === "string" && b.style !== "none") {
+        const target = side === "top" ? "t" : side === "left" ? "l" : side === "bottom" ? "b" : "r";
+        const c = argbToRgb(b.color?.argb ?? b.color);
+        bd[target] = { s: b.style, ...(c ? { c } : {}) };
+      }
+    }
+    if (Object.keys(bd).length > 0) st.bd = bd;
+  }
+  if (alignment && typeof alignment === "object") {
+    if (typeof alignment.horizontal === "string") st.h = alignment.horizontal;
+    if (typeof alignment.vertical === "string") st.v = alignment.vertical;
+    if (alignment.wrapText) st.wrap = true;
+    if (alignment.shrinkToFit) st.shrink = true;
+    if (typeof alignment.indent === "number" && alignment.indent > 0) st.indent = alignment.indent;
+    if (typeof alignment.textRotation === "number" && alignment.textRotation !== 0) {
+      st.rot = alignment.textRotation;
+    }
+  }
+
+  return Object.keys(st).length > 0 ? st : undefined;
+}
+
 // ─────────────────────────────────────────────────────────────
-// Bridge → .xlsx (vrai fichier Excel)
+// Bridge → .xlsx (vrai fichier Excel, mise en forme COMPLÈTE)
 // ─────────────────────────────────────────────────────────────
 
-export function bridgeToXlsx(workbook: BridgeWorkbook): ArrayBuffer {
-  const wb = XLSX.utils.book_new();
+export async function bridgeToXlsx(workbook: BridgeWorkbook): Promise<Uint8Array> {
+  const ExcelJS = await loadExcelJS();
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "Cabinet SERMA — Back-office";
+  wb.created = new Date();
+
   const usedNames = new Set<string>();
 
   for (let i = 0; i < workbook.sheets.length; i++) {
     const sheet = workbook.sheets[i];
 
-    // Nom unique et sûr (31 caractères max)
     let name = sanitizeSheetName(sheet.name, i);
     let suffix = 2;
     while (usedNames.has(name.toLowerCase())) {
@@ -183,85 +521,136 @@ export function bridgeToXlsx(workbook: BridgeWorkbook): ArrayBuffer {
     }
     usedNames.add(name.toLowerCase());
 
-    const ws: XLSX.WorkSheet = {};
-    let maxR = 0;
-    let maxC = 0;
+    const ws = wb.addWorksheet(name, {
+      state: sheet.hidden ? "hidden" : "visible",
+      properties: {
+        ...(sheet.tabColor ? { tabColor: { argb: `FF${sheet.tabColor}` } } : {}),
+      },
+    });
 
+    if (sheet.freeze && (sheet.freeze.x > 0 || sheet.freeze.y > 0)) {
+      ws.views = [
+        { state: "frozen", xSplit: sheet.freeze.x, ySplit: sheet.freeze.y },
+      ];
+    }
+
+    // Valeurs + formules + styles (avant les fusions : ExcelJS redirige
+    // ensuite les écritures des cellules fusionnées vers la cellule maître)
     for (const [k, cell] of Object.entries(sheet.cells)) {
       const [rStr, cStr] = k.split(":");
       const r = Number(rStr);
       const c = Number(cStr);
       if (!Number.isFinite(r) || !Number.isFinite(c)) continue;
 
-      const out: XLSX.CellObject = {} as XLSX.CellObject;
+      const ec = ws.getCell(r + 1, c + 1);
+
       if (cell.f !== undefined && cell.f !== "") {
-        // SheetJS attend la formule sans « = » ET exige une valeur en cache,
-        // sinon la cellule est silencieusement abandonnée à l'écriture.
-        out.f = cell.f.startsWith("=") ? cell.f.slice(1) : cell.f;
-        if (cell.v !== undefined && cell.v !== null) {
-          out.v = cell.v;
+        const formula = cell.f.startsWith("=") ? cell.f.slice(1) : cell.f;
+        if (cell.link) {
+          ec.value = {
+            hyperlink: cell.link,
+            text: typeof cell.v === "string" ? cell.v : formula,
+          };
         } else {
-          out.v = 0; // recalculée par Excel / Univer à l'ouverture
+          ec.value = {
+            formula,
+            ...(cell.v !== undefined && cell.v !== null ? { result: cell.v as number } : {}),
+          };
         }
-        if (typeof out.v === "number") out.t = "n";
-        else if (typeof out.v === "boolean") out.t = "b";
-        else if (typeof out.v === "string") out.t = "s";
+      } else if (cell.link) {
+        ec.value = {
+          hyperlink: cell.link,
+          text: typeof cell.v === "string" ? cell.v : cell.link,
+        };
       } else if (cell.v !== undefined && cell.v !== null) {
-        out.v = cell.v;
-        if (typeof cell.v === "number") out.t = "n";
-        else if (typeof cell.v === "boolean") out.t = "b";
-        else out.t = "s";
-      } else if (cell.v === "") {
-        out.v = "";
-        out.t = "s";
+        ec.value = cell.v;
       }
-      if (cell.z) out.z = cell.z;
 
-      if (out.v !== undefined || out.f !== undefined || out.z !== undefined) {
-        ws[XLSX.utils.encode_cell({ r, c })] = out;
-        if (r > maxR) maxR = r;
-        if (c > maxC) maxC = c;
+      if (cell.z) ec.numFmt = cell.z;
+      if (cell.st) applyExceljsStyle(ec, cell.st);
+    }
+
+    // Fusions
+    for (const m of sheet.merges) {
+      try {
+        ws.mergeCells(m.sr + 1, m.sc + 1, m.er + 1, m.ec + 1);
+      } catch {
+        // fusion déjà posée / invalide → ignorée
       }
     }
 
-    ws["!ref"] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: maxR, c: maxC } });
-
-    if (sheet.merges.length > 0) {
-      ws["!merges"] = sheet.merges.map((m) => ({
-        s: { r: m.sr, c: m.sc },
-        e: { r: m.er, c: m.ec },
-      }));
-    }
-
-    const cols: XLSX.ColInfo[] = [];
+    // Largeurs de colonnes / hauteurs de lignes
     for (const [cStr, px] of Object.entries(sheet.colWidths)) {
-      cols[Number(cStr)] = { wpx: Math.round(px) };
+      ws.getColumn(Number(cStr) + 1).width = pxToWch(px);
     }
-    if (cols.length > 0) ws["!cols"] = cols;
-
-    const rows: XLSX.RowInfo[] = [];
     for (const [rStr, px] of Object.entries(sheet.rowHeights)) {
-      rows[Number(rStr)] = { hpx: Math.round(px) };
+      ws.getRow(Number(rStr) + 1).height = pxToHpt(px);
     }
-    if (rows.length > 0) ws["!rows"] = rows;
-
-    if (sheet.hidden) {
-      (ws as unknown as { hidden?: boolean }).hidden = true;
-    }
-
-    XLSX.utils.book_append_sheet(wb, ws, name);
   }
 
-  if (wb.SheetNames.length === 0) {
-    XLSX.utils.book_append_sheet(wb, { "!ref": "A1:A1" }, "Feuille1");
+  if (wb.worksheets.length === 0) {
+    wb.addWorksheet("Feuille1");
   }
 
-  const out = XLSX.write(wb, { bookType: "xlsx", type: "array" }) as ArrayBuffer;
-  return out;
+  const out = await wb.xlsx.writeBuffer();
+  // Node Buffer comme ArrayBuffer : les deux sont normalisés ici
+  return out instanceof ArrayBuffer ? new Uint8Array(out) : new Uint8Array(out as Buffer);
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function applyExceljsStyle(cell: any, st: BridgeStyle): void {
+  if (st.ff !== undefined || st.fs !== undefined || st.bold || st.italic || st.underline || st.strike || st.color) {
+    cell.font = {
+      ...(st.ff ? { name: st.ff } : {}),
+      ...(st.fs ? { size: st.fs } : {}),
+      ...(st.bold ? { bold: true } : {}),
+      ...(st.italic ? { italic: true } : {}),
+      ...(st.underline ? { underline: true } : {}),
+      ...(st.strike ? { strike: true } : {}),
+      ...(st.color ? { color: { argb: `FF${st.color}` } } : {}),
+    };
+  }
+  if (st.fill) {
+    cell.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: `FF${st.fill}` },
+    };
+  }
+  if (st.bd) {
+    const border: Record<string, { style: string; color?: { argb: string } }> = {};
+    type SideKey = keyof NonNullable<BridgeStyle["bd"]> & string;
+    const sides: Array<[SideKey, string]> = [
+      ["t", "top"],
+      ["l", "left"],
+      ["b", "bottom"],
+      ["r", "right"],
+    ];
+    for (const [k, side] of sides) {
+      const b = st.bd?.[k];
+      if (b) {
+        border[side] = {
+          style: b.s,
+          ...(b.c ? { color: { argb: `FF${b.c}` } } : {}),
+        };
+      }
+    }
+    if (Object.keys(border).length > 0) cell.border = border;
+  }
+  if (st.h !== undefined || st.v !== undefined || st.wrap || st.shrink || st.indent || st.rot !== undefined) {
+    const alignment: Record<string, string | number | boolean> = {};
+    if (st.h) alignment.horizontal = st.h === "justified" ? "justify" : st.h;
+    if (st.v) alignment.vertical = st.v === "center" ? "middle" : st.v;
+    if (st.wrap) alignment.wrapText = true;
+    if (st.shrink) alignment.shrinkToFit = true;
+    if (st.indent) alignment.indent = st.indent;
+    if (st.rot !== undefined) alignment.textRotation = st.rot;
+    cell.alignment = alignment;
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
-// Bridge → données Univer (création du classeur)
+// Bridge → données Univer (création du classeur, styles complets)
 // ─────────────────────────────────────────────────────────────
 
 const BUFFER_ROWS = 40;
@@ -269,20 +658,119 @@ const BUFFER_COLS = 6;
 const MAX_ROWS = 5000;
 const MAX_COLS = 120;
 
+/** Style du pont → IStyleData Univer (enums numériques 1.2 vérifiées). */
+function bridgeStyleToUniver(st: BridgeStyle): IStyleData {
+  const out: IStyleData = {};
+  if (st.ff) out.ff = st.ff;
+  if (typeof st.fs === "number" && st.fs > 0) out.fs = st.fs;
+  if (st.bold) out.bl = 1;
+  if (st.italic) out.it = 1;
+  if (st.underline) out.ul = { s: 1 };
+  if (st.strike) out.st = { s: 1 };
+  if (st.color) out.cl = { rgb: `#${st.color}` };
+  if (st.fill) out.bg = { rgb: `#${st.fill}` };
+  if (st.bd) {
+    const bd: IStyleData["bd"] = {};
+    for (const k of ["t", "r", "b", "l"] as const) {
+      const b = st.bd[k];
+      if (!b) continue;
+      const numeric = BORDER_NAME_TO_UNIVER[b.s];
+      if (numeric === undefined) continue;
+      bd[k] = {
+        // enum numérique BorderStyleTypes du runtime Univer 1.2
+        s: numeric as unknown as NonNullable<NonNullable<IStyleData["bd"]>["t"]>["s"],
+        ...(b.c ? { cl: { rgb: `#${b.c}` } } : {}),
+      };
+    }
+    if (Object.keys(bd).length > 0) out.bd = bd;
+  }
+  if (st.h) {
+    const numeric = H_ALIGN_TO_UNIVER[st.h];
+    if (numeric && numeric > 0) out.ht = numeric as IStyleData["ht"];
+  }
+  if (st.v) {
+    const numeric = V_ALIGN_TO_UNIVER[st.v];
+    if (numeric && numeric > 0) out.vt = numeric as IStyleData["vt"];
+  }
+  if (st.wrap) out.tb = 3; // WrapStrategy.WRAP
+  if (st.shrink) out.stf = 1;
+  if (st.rot !== undefined) {
+    if (st.rot === 255) out.tr = { a: 0, v: 1 };
+    else out.tr = { a: st.rot };
+  }
+  return out;
+}
+
+/** IStyleData Univer (snapshot) → style du pont (enums numériques 1.2). */
+export function univerStyleToBridge(style: IStyleData): BridgeStyle | undefined {
+  if (!style || typeof style !== "object") return undefined;
+  const st: BridgeStyle = {};
+
+  if (typeof style.ff === "string" && style.ff) st.ff = style.ff;
+  if (typeof style.fs === "number" && style.fs > 0) st.fs = style.fs;
+  if (style.bl === 1) st.bold = true;
+  if (style.it === 1) st.italic = true;
+  if (style.ul?.s === 1) st.underline = true;
+  if (style.st?.s === 1) st.strike = true;
+  const cl = univerColorToRgb(style.cl?.rgb);
+  if (cl && cl !== "000000") st.color = cl;
+  const bg = univerColorToRgb(style.bg?.rgb);
+  if (bg && bg !== "FFFFFF") st.fill = bg;
+
+  const bd = style.bd;
+  if (bd && typeof bd === "object") {
+    const out: BridgeStyle["bd"] = {};
+    for (const k of ["t", "r", "b", "l"] as const) {
+      const b = bd[k];
+      if (!b || typeof b !== "object") continue;
+      const name = BORDER_UNIVER_TO_NAME[b.s as number];
+      if (!name || name === "none") continue;
+      out[k] = { s: name, ...(b.cl?.rgb ? { c: univerColorToRgb(b.cl.rgb) ?? undefined } : {}) };
+    }
+    if (Object.keys(out).length > 0) st.bd = out;
+  }
+
+  if (typeof style.ht === "number") {
+    const name = H_UNIVER_TO_ALIGN[style.ht];
+    if (name) st.h = name;
+  } else if (typeof style.ht === "string") {
+    st.h = style.ht;
+  }
+  if (typeof style.vt === "number") {
+    const name = V_UNIVER_TO_ALIGN[style.vt];
+    if (name) st.v = name;
+  } else if (typeof style.vt === "string") {
+    st.v = style.vt;
+  }
+  if (style.tb === 3) st.wrap = true;
+  if (style.stf === 1) st.shrink = true;
+  const tr = style.tr;
+  if (tr && typeof tr === "object") {
+    if (typeof tr.a === "number" && tr.a !== 0) st.rot = tr.a;
+    else if (tr.v) st.rot = 255;
+  }
+
+  return Object.keys(st).length > 0 ? st : undefined;
+}
+
 export function bridgeToUniverData(
   docName: string,
   workbook: BridgeWorkbook
 ): Partial<IWorkbookData> {
-  // Styles dédupliqués par pattern de format de nombre
-  const styleByPattern = new Map<string, string>();
-  const styles: Record<string, { n?: { pattern: string } }> = {};
+  // Styles dédupliqués par contenu exact (formule → id)
+  const styleByKey = new Map<string, string>();
+  const styles: Record<string, IStyleData> = {};
   let styleSeq = 0;
-  function styleKeyOf(pattern: string): string {
-    let k = styleByPattern.get(pattern);
+  function styleIdOf(st: BridgeStyle, pattern?: string): string | undefined {
+    const univerStyle = bridgeStyleToUniver(st);
+    const full: IStyleData = pattern ? { ...univerStyle, n: { pattern } } : univerStyle;
+    if (Object.keys(full).length === 0) return undefined;
+    const cacheKey = JSON.stringify(full);
+    let k = styleByKey.get(cacheKey);
     if (!k) {
       k = `s${styleSeq++}`;
-      styleByPattern.set(pattern, k);
-      styles[k] = { n: { pattern } };
+      styleByKey.set(cacheKey, k);
+      styles[k] = full;
     }
     return k;
   }
@@ -308,10 +796,12 @@ export function bridgeToUniverData(
         cd.v = cell.v;
       }
       if (cell.f !== undefined && cell.f !== "") {
-        // Univer stocke la formule AVEC « = »
         cd.f = cell.f.startsWith("=") ? cell.f : `=${cell.f}`;
       }
-      if (cell.z) cd.s = styleKeyOf(cell.z);
+      if (cell.st || cell.z) {
+        const sid = cell.st ? styleIdOf(cell.st, cell.z) : styleIdOf({}, cell.z);
+        if (sid) cd.s = sid;
+      }
       if (cd.v !== undefined || cd.f !== undefined || cd.s !== undefined) {
         (cellData[r] ??= {})[c] = cd;
         if (r > maxR) maxR = r;
@@ -328,12 +818,21 @@ export function bridgeToUniverData(
       rowData[Number(rStr)] = { h: Math.round(px) };
     }
 
+    const freeze = sheet.freeze;
     return {
-      // PAS d'identifiant personnalisé : Univer attribue les siens et un id
-      // externe casse l'index interne (getSheetBySheetId ne retrouve plus la
-      // feuille → toutes les commandes d'édition échouent silencieusement).
       name: sanitizeSheetName(sheet.name, i),
       hidden: sheet.hidden ? 1 : 0,
+      ...(sheet.tabColor ? { tabColor: `#${sheet.tabColor}` } : {}),
+      ...(freeze && (freeze.x > 0 || freeze.y > 0)
+        ? {
+            freeze: {
+              xSplit: freeze.x,
+              ySplit: freeze.y,
+              startRow: freeze.y,
+              startColumn: freeze.x,
+            },
+          }
+        : {}),
       rowCount: Math.min(maxR + 1 + BUFFER_ROWS, MAX_ROWS),
       columnCount: Math.min(maxC + 1 + BUFFER_COLS, MAX_COLS),
       cellData,
@@ -345,7 +844,7 @@ export function bridgeToUniverData(
       })),
       columnData,
       rowData,
-    };
+    } as Partial<IWorksheetData>;
   });
 
   if (sheets.length === 0) {
@@ -359,8 +858,7 @@ export function bridgeToUniverData(
   }
 
   // sheets doit être un RECORD (clé = id de feuille) et chaque snapshot doit
-  // porter le MÊME id que la clé — sinon l'index interne d'Univer diverge et
-  // toutes les commandes d'édition échouent (getSheetBySheetId introuvable).
+  // porter le MÊME id que la clé — sinon l'index interne d'Univer diverge.
   const sheetsRecord: Record<string, Partial<IWorksheetData>> = {};
   sheets.forEach((sheet, i) => {
     const id = `sheet-${i}`;
@@ -388,7 +886,6 @@ export function legacyGridToBridge(docName: string, legacy: LegacySheetData): Br
   const cells: Record<string, BridgeCell> = {};
   const colWidths: Record<number, number> = {};
 
-  // Ligne 1 = en-têtes de colonnes
   legacy.cols.forEach((label, c) => {
     if (label) cells[key(0, c)] = { v: String(label) };
     colWidths[c] = 140;

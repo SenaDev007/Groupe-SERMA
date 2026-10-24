@@ -9,6 +9,9 @@ import { DOC_KIND_LABELS, formatDateFr, formatBytes } from "@/lib/back-office/co
 import { Button } from "@/components/ui/button";
 import { ChevronRight, ArrowLeft } from "lucide-react";
 import type { Metadata } from "next";
+import fs from "fs/promises";
+import path from "path";
+import { docxToHtmlServer } from "@/lib/docx/server";
 
 export const dynamic = "force-dynamic";
 
@@ -86,6 +89,22 @@ export default async function DocumentEditorPage({
     </Button>
   );
 
+  // Fichier Word importé (.docx) → conversion serveur (mammoth) pour
+  // l'édition directe du VRAI fichier dans l'éditeur enrichi.
+  let docxHtml: string | null = null;
+  if (doc.kind === "FILE" && isDocx(doc) && doc.filePath) {
+    try {
+      const uploadDir =
+        process.env.BO_UPLOAD_DIR ?? path.join(process.cwd(), "upload", "bo-files");
+      const bytes = await fs.readFile(
+        path.join(uploadDir, path.basename(doc.filePath))
+      );
+      docxHtml = await docxToHtmlServer(new Uint8Array(bytes));
+    } catch {
+      docxHtml = null; // fichier illisible → repli visionnage
+    }
+  }
+
   const meta = (
     <div className="flex flex-wrap items-center gap-2 mb-5">
       <BoBadge tone="orange">{DOC_KIND_LABELS[doc.kind] ?? doc.kind}</BoBadge>
@@ -113,6 +132,7 @@ export default async function DocumentEditorPage({
             documentId={doc.id}
             documentName={doc.name}
             hasFile={!!doc.filePath}
+            serverVersion={doc.version}
             fallbackLegacy={parseLegacy(doc.content)}
           />
         </>
@@ -139,13 +159,28 @@ export default async function DocumentEditorPage({
             documentId={doc.id}
             documentName={doc.name}
             hasFile={!!doc.filePath}
+            serverVersion={doc.version}
             fallbackLegacy={parseLegacy(doc.content)}
           />
         </>
       )}
 
-      {/* Fichier non-Excel importé (PDF, image…) → visionnage */}
-      {doc.kind === "FILE" && !isXlsx(doc) && (
+      {/* Fichier Word importé (.docx) → édition directe du VRAI fichier */}
+      {doc.kind === "FILE" && isDocx(doc) && docxHtml !== null && (
+        <>
+          <BoPageHeader eyebrow="Fichier Word" title={doc.name} />
+          {meta}
+          <DocumentEditor
+            documentId={doc.id}
+            documentName={doc.name}
+            initialContent={docxHtml}
+            hasFile
+          />
+        </>
+      )}
+
+      {/* Fichier Word illisible ou autre format → visionnage */}
+      {doc.kind === "FILE" && !isXlsx(doc) && !(isDocx(doc) && docxHtml !== null) && (
         <>
           <BoPageHeader eyebrow="Fichier importé" title={doc.name} />
           {meta}
@@ -158,6 +193,13 @@ export default async function DocumentEditorPage({
         </>
       )}
     </div>
+  );
+}
+
+function isDocx(doc: { name: string; mimeType: string | null }): boolean {
+  return (
+    /\.docx$/i.test(doc.name) ||
+    !!doc.mimeType?.includes("wordprocessingml")
   );
 }
 

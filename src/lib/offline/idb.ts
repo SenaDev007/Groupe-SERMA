@@ -92,18 +92,32 @@ export async function outboxClear(): Promise<void> {
 
 // ── blobs (fichiers importés hors-ligne) ─────────────────────
 
-export async function blobPut(key: string, file: Blob): Promise<void> {
-  await tx("blobs", "readwrite", (s) => s.put({ key, file }));
+export interface BlobRecord {
+  key: string;
+  file: Blob;
+  /** Version du document au moment de la mise en cache (fraîcheur). */
+  version?: number;
+}
+
+export async function blobPut(key: string, file: Blob, version?: number): Promise<void> {
+  await tx("blobs", "readwrite", (s) => s.put({ key, file, version }));
 }
 
 export async function blobGet(key: string): Promise<Blob | null> {
   if (!isBrowser()) return null;
-  const rec = await tx<{ key: string; file: Blob } | undefined>(
-    "blobs",
-    "readonly",
-    (s) => s.get(key)
+  const rec = await tx<BlobRecord | undefined>("blobs", "readonly", (s) =>
+    s.get(key)
   );
   return rec?.file ?? null;
+}
+
+/** Enregistrement blob complet (fichier + version en cache). */
+export async function blobGetRecord(key: string): Promise<BlobRecord | null> {
+  if (!isBrowser()) return null;
+  const rec = await tx<BlobRecord | undefined>("blobs", "readonly", (s) =>
+    s.get(key)
+  );
+  return rec ?? null;
 }
 
 export async function blobDelete(key: string): Promise<void> {
