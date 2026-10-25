@@ -15,7 +15,9 @@ export async function GET() {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }
   try {
-    const snapshot = await buildBoSnapshot();
+    // « fresh » : ce point d'entrée alimente la réconciliation du moteur
+    // offline — les données doivent refléter la base au moment de l'appel.
+    const snapshot = await buildBoSnapshot({ fresh: true });
     return NextResponse.json(
       { serverTime: new Date().toISOString(), snapshot },
       { headers: { "Cache-Control": "no-store" } }

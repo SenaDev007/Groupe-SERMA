@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import prisma from "@/lib/prisma";
+import { buildBoSnapshot } from "@/lib/back-office/snapshot";
 import { BoPageHeader, BoBadge, STATUS_TONES } from "@/components/back-office/BoKit";
 import { ClientExplorer, type ExplorerDocument } from "@/components/back-office/ClientExplorer";
 import { WorkItemsPanel, type WorkItemRow } from "@/components/back-office/WorkItemsPanel";
@@ -32,20 +32,55 @@ export default async function ClientDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const client = await prisma.client.findUnique({ where: { id } });
+
+  // Données dérivées de l'instantané partagé avec le layout (cache court) :
+  // zéro requête supplémentaire — la base Neon distante coûte ~1 s par
+  // requête, ce dossier client n'en ajoute AUCUNE.
+  const snap = await buildBoSnapshot();
+  let client = snap.clients.find((c) => c.id === id);
+
+  // Repli direct (client créé très récemment, pas encore dans le cache) :
+  // une seule requête, uniquement dans ce cas rare.
+  if (!client) {
+    const { default: prisma } = await import("@/lib/prisma");
+    const fresh = await prisma.client.findUnique({ where: { id } });
+    if (fresh) {
+      client = {
+        id: fresh.id,
+        type: fresh.type,
+        name: fresh.name,
+        sector: fresh.sector,
+        contactName: fresh.contactName,
+        email: fresh.email,
+        phone: fresh.phone,
+        address: fresh.address,
+        taxId: fresh.taxId,
+        status: fresh.status,
+        notes: fresh.notes,
+        createdAt: fresh.createdAt.toISOString(),
+        updatedAt: fresh.updatedAt.toISOString(),
+      };
+    }
+  }
   if (!client) notFound();
 
-  const [folders, documents, workItems] = await Promise.all([
-    prisma.folder.findMany({ where: { clientId: id }, orderBy: { createdAt: "asc" } }),
-    prisma.document.findMany({
-      where: { folder: { clientId: id } },
-      orderBy: { updatedAt: "desc" },
-    }),
-    prisma.workItem.findMany({
-      where: { clientId: id },
-      orderBy: [{ status: "asc" }, { dueDate: "asc" }],
-    }),
-  ]);
+  const clientFolderIds = new Set(
+    snap.folders.filter((f) => f.clientId === id).map((f) => f.id)
+  );
+
+  const folders = snap.folders
+    .filter((f) => f.clientId === id)
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const documents = snap.documents
+    .filter((d) => d.folderId && clientFolderIds.has(d.folderId))
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  const workItems = snap.workItems
+    .filter((w) => w.clientId === id)
+    .sort(
+      (a, b) =>
+        a.status.localeCompare(b.status) ||
+        String(a.dueDate ?? "").localeCompare(String(b.dueDate ?? ""))
+    );
 
   // Props SSR : premier rendu instantané, store local dès que prêt
   const initialFolders = folders.map((f) => ({
@@ -53,8 +88,8 @@ export default async function ClientDetailPage({
     clientId: f.clientId,
     parentId: f.parentId,
     name: f.name,
-    createdAt: f.createdAt.toISOString(),
-    updatedAt: f.updatedAt.toISOString(),
+    createdAt: f.createdAt,
+    updatedAt: f.updatedAt,
   }));
 
   const initialDocuments: ExplorerDocument[] = documents.map((d) => ({
@@ -64,7 +99,7 @@ export default async function ClientDetailPage({
     source: d.source,
     size: d.size,
     folderId: d.folderId,
-    updatedAt: d.updatedAt.toISOString(),
+    updatedAt: d.updatedAt,
     version: d.version,
   }));
 
@@ -74,7 +109,7 @@ export default async function ClientDetailPage({
     category: w.category,
     status: w.status,
     priority: w.priority,
-    dueDate: w.dueDate ? w.dueDate.toISOString() : null,
+    dueDate: w.dueDate,
     notes: w.notes,
     documentCount: documents.filter((d) => d.workItemId === w.id).length,
   }));

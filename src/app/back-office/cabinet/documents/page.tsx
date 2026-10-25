@@ -1,5 +1,5 @@
 import Link from "next/link";
-import prisma from "@/lib/prisma";
+import { buildBoSnapshot } from "@/lib/back-office/snapshot";
 import { BoPageHeader, BoEmptyState } from "@/components/back-office/BoKit";
 import { DocumentsPanel, type DocumentRow } from "@/components/back-office/DocumentsPanel";
 import {
@@ -22,25 +22,22 @@ export default async function DocumentsPage({
 }) {
   const { client: clientFilter } = await searchParams;
 
+  // Données dérivées de l'instantané partagé avec le layout (cache court) :
+  // zéro requête supplémentaire — la base Neon distante coûte ~1 s par
+  // requête, cette bibliothèque n'en ajoute AUCUNE.
+  const snap = await buildBoSnapshot();
+
   // Documents du client = documents rangés dans ses dossiers
-  const documents = await prisma.document.findMany({
-    where: {
-      entity: "CABINET",
-      ...(clientFilter ? { folder: { clientId: clientFilter } } : {}),
-    },
-    orderBy: { updatedAt: "desc" },
-    include: {
-      folder: { select: { id: true, name: true, parentId: true, clientId: true } },
-      workItem: { select: { title: true } },
-    },
-    take: 200,
-  });
+  const documents = snap.documents
+    .filter((d) => d.entity === "CABINET")
+    .filter((d) =>
+      clientFilter
+        ? snap.folders.some((f) => f.id === d.folderId && f.clientId === clientFilter)
+        : true
+    );
 
   // Chemin complet de chaque dossier (pour l'affichage)
-  const allFolders = await prisma.folder.findMany({
-    select: { id: true, name: true, parentId: true, clientId: true },
-  });
-  const folderById = new Map(allFolders.map((f) => [f.id, f]));
+  const folderById = new Map(snap.folders.map((f) => [f.id, f]));
 
   function pathLabel(folderId: string | null): string | null {
     if (!folderId) return null;
@@ -55,12 +52,7 @@ export default async function DocumentsPage({
     return names.length > 0 ? names.join(" / ") : null;
   }
 
-  const clientNames = new Map(
-    (await prisma.client.findMany({ select: { id: true, name: true, type: true } })).map((c) => [
-      c.id,
-      c,
-    ])
-  );
+  const clientNames = new Map(snap.clients.map((c) => [c.id, c]));
 
   const rows: DocumentRow[] = documents.map((d) => ({
     id: d.id,
@@ -69,17 +61,23 @@ export default async function DocumentsPage({
     source: d.source,
     size: d.size,
     mimeType: d.mimeType,
-    updatedAt: d.updatedAt.toISOString(),
+    updatedAt: d.updatedAt,
     version: d.version,
-    clientName: d.folder ? clientNames.get(d.folder.clientId)?.name ?? null : null,
+    clientName: d.folderId
+      ? (snap.folders.find((f) => f.id === d.folderId) &&
+          clientNames.get(snap.folders.find((f) => f.id === d.folderId)!.clientId)
+            ?.name) ??
+        null
+      : null,
     folderPath: pathLabel(d.folderId),
-    workItemTitle: d.workItem?.title ?? null,
+    workItemTitle: d.workItemId
+      ? snap.workItems.find((w) => w.id === d.workItemId)?.title ?? null
+      : null,
   }));
 
-  const clients = await prisma.client.findMany({
-    orderBy: { name: "asc" },
-    select: { id: true, name: true, type: true },
-  });
+  const clients = [...snap.clients].sort((a, b) =>
+    a.name.localeCompare(b.name)
+  );
 
   return (
     <div className="max-w-7xl mx-auto">

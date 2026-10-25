@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { getSession } from "@/lib/auth";
 import prisma from "@/lib/prisma";
-import { buildBoSnapshot } from "@/lib/back-office/snapshot";
+import { buildBoSnapshot, invalidateBoSnapshotCache } from "@/lib/back-office/snapshot";
+import { generateSheetXlsxBytes, generateDocxBytes } from "@/lib/office/generate";
 import fs from "fs/promises";
 import fsSync from "fs";
 import path from "path";
@@ -283,15 +284,51 @@ async function applyMutation(m: IncomingMutation): Promise<void> {
         const folder = await prisma.folder.findUnique({ where: { id: folderId } });
         if (!folder) throw new Error("Dossier de destination introuvable.");
       }
+
+      // ── VRAI FICHIER MICROSOFT dès la création ──
+      // Tableur → classeur .xlsx mis en forme ; document → .docx réel.
+      // Le fichier s'ouvre ensuite dans Microsoft Excel / Word avec
+      // l'intégralité des fonctionnalités du produit Office.
+      let filePath: string | undefined;
+      let displayName = name;
+      let mimeType: string | undefined;
+      let size: number | undefined;
+      if (kind === "SHEET" || kind === "DOC") {
+        const isSheet = kind === "SHEET";
+        const ext = isSheet ? ".xlsx" : ".docx";
+        displayName = new RegExp(`\\${ext}$`, "i").test(name)
+          ? name
+          : `${name.replace(/\.(xlsx|docx)$/i, "")}${ext}`;
+        try {
+          const bytes = isSheet
+            ? await generateSheetXlsxBytes(displayName, content)
+            : await generateDocxBytes(displayName, content);
+          const storedName = `${randomUUID()}-${displayName.replace(/[\/\\\0]/g, "_")}`;
+          await fs.mkdir(UPLOAD_DIR, { recursive: true });
+          await fs.writeFile(path.join(UPLOAD_DIR, storedName), bytes);
+          filePath = storedName;
+          mimeType = isSheet
+            ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            : "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+          size = bytes.byteLength;
+        } catch {
+          // génération impossible (ex. hors-ligne) → le fichier sera
+          // matérialisé à l'ouverture de la page document (ensureOfficeFile)
+        }
+      }
+
       await prisma.document.create({
         data: {
           id: s(p.id),
-          name,
+          name: displayName,
           kind,
           entity: s(p.entity) || "CABINET",
           content,
           folderId,
           workItemId: optS(p.workItemId),
+          ...(filePath ? { filePath } : {}),
+          ...(mimeType ? { mimeType } : {}),
+          ...(size !== undefined ? { size } : {}),
         },
       });
       return;
@@ -601,8 +638,11 @@ export async function POST(req: Request) {
     }
   }
 
-  // Réponses du site public visibles immédiatement après synchro
-  const snapshot = await buildBoSnapshot();
+  // Réponses du site public visibles immédiatement après synchro.
+  // Cache d'instantané invalidé : la réponse ET les prochains rendus de
+  // pages servent les données post-mutations.
+  invalidateBoSnapshotCache();
+  const snapshot = await buildBoSnapshot({ fresh: true });
   return NextResponse.json(
     { results, serverTime: new Date().toISOString(), snapshot },
     { headers: { "Cache-Control": "no-store" } }

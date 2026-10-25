@@ -1,25 +1,43 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import prisma from "@/lib/prisma";
-import { UniverSheetEditor } from "@/components/back-office/UniverSheetEditor";
-import { DocumentEditor } from "@/components/back-office/DocumentEditor";
+import { OfficeLauncher } from "@/components/back-office/OfficeLauncher";
 import { FileViewer } from "@/components/back-office/FileViewer";
+import { SyncWaiter } from "@/components/back-office/SyncWaiter";
 import { BoBadge, BoPageHeader } from "@/components/back-office/BoKit";
 import { DOC_KIND_LABELS, formatDateFr, formatBytes } from "@/lib/back-office/constants";
 import { Button } from "@/components/ui/button";
 import { ChevronRight, ArrowLeft } from "lucide-react";
 import type { Metadata } from "next";
-import fs from "fs/promises";
-import path from "path";
-import { docxToHtmlServer } from "@/lib/docx/server";
+import { ensureOfficeFile } from "@/lib/office/generate";
+import { signOfficeFileToken, officeFilePath } from "@/lib/office/token";
 
 export const dynamic = "force-dynamic";
 
 export async function generateMetadata(): Promise<Metadata> {
-  return { title: "Éditeur — Document", robots: { index: false, follow: false } };
+  return { title: "Fichier Microsoft Office — Document", robots: { index: false, follow: false } };
 }
 
-export default async function DocumentEditorPage({
+/** Document tableur / Excel → lanceur Microsoft Excel. */
+function isExcelFile(doc: { name: string; mimeType: string | null; kind: string }): boolean {
+  return (
+    doc.kind === "SHEET" ||
+    /\.(xlsx|xls|csv)$/i.test(doc.name) ||
+    !!doc.mimeType?.includes("spreadsheetml") ||
+    !!doc.mimeType?.includes("ms-excel")
+  );
+}
+
+/** Document texte / Word → lanceur Microsoft Word. */
+function isWordFile(doc: { name: string; mimeType: string | null; kind: string }): boolean {
+  return (
+    doc.kind === "DOC" ||
+    /\.(docx|doc)$/i.test(doc.name) ||
+    !!doc.mimeType?.includes("wordprocessingml")
+  );
+}
+
+export default async function DocumentOfficePage({
   params,
 }: {
   params: Promise<{ docId: string }>;
@@ -32,21 +50,56 @@ export default async function DocumentEditorPage({
       workItem: { select: { id: true, title: true } },
     },
   });
-  if (!doc) notFound();
+
+  // Création hors-ligne en cours de synchronisation → attente active
+  // (le moteur rejoue la mutation vers PostgreSQL, la page se rafraîchit).
+  if (!doc) return <SyncWaiter label={docId} />;
+
+  // Tableur / document interne : le VRAI fichier Microsoft (.xlsx / .docx)
+  // est matérialisé sur le serveur s'il n'existe pas encore (documents
+  // hérités, créés hors-ligne…) — idempotent.
+  const isOfficeKind = doc.kind === "SHEET" || doc.kind === "DOC";
+  const isExcel = isExcelFile(doc);
+  const isWord = !isExcel && isWordFile(doc);
+
+  if (isOfficeKind) {
+    const materialized = await ensureOfficeFile(doc.id, {
+      id: doc.id,
+      name: doc.name,
+      kind: doc.kind,
+      content: doc.content,
+      filePath: doc.filePath,
+      mimeType: doc.mimeType,
+      size: doc.size,
+    });
+    if (!materialized) return notFound();
+    doc.name = materialized.name;
+    doc.filePath = materialized.filePath;
+    if (materialized.size) doc.size = materialized.size;
+    if (materialized.mimeType) doc.mimeType = materialized.mimeType;
+  }
+
+  // Fichier Office importé sans fichier physique → import en cours de sync
+  if (doc.kind === "FILE" && !doc.filePath && (isExcel || isWord)) {
+    return <SyncWaiter label={doc.name} />;
+  }
 
   // Fil d'Ariane contextuel : chaîne complète de dossiers jusqu'au fichier
+  // (client + dossiers en UNE salve parallèle — base distante)
   let clientInfo: { id: string; name: string } | null = null;
   const folderChain: { id: string; name: string }[] = [];
   if (doc.folder) {
-    const client = await prisma.client.findUnique({
-      where: { id: doc.folder.clientId },
-      select: { id: true, name: true },
-    });
+    const [client, allFolders] = await Promise.all([
+      prisma.client.findUnique({
+        where: { id: doc.folder.clientId },
+        select: { id: true, name: true },
+      }),
+      prisma.folder.findMany({
+        where: { clientId: doc.folder.clientId },
+        select: { id: true, name: true, parentId: true },
+      }),
+    ]);
     clientInfo = client;
-    const allFolders = await prisma.folder.findMany({
-      where: { clientId: doc.folder.clientId },
-      select: { id: true, name: true, parentId: true },
-    });
     const byId = new Map(allFolders.map((f) => [f.id, f]));
     let current = byId.get(doc.folder.id);
     let guard = 0;
@@ -89,22 +142,6 @@ export default async function DocumentEditorPage({
     </Button>
   );
 
-  // Fichier Word importé (.docx) → conversion serveur (mammoth) pour
-  // l'édition directe du VRAI fichier dans l'éditeur enrichi.
-  let docxHtml: string | null = null;
-  if (doc.kind === "FILE" && isDocx(doc) && doc.filePath) {
-    try {
-      const uploadDir =
-        process.env.BO_UPLOAD_DIR ?? path.join(process.cwd(), "upload", "bo-files");
-      const bytes = await fs.readFile(
-        path.join(uploadDir, path.basename(doc.filePath))
-      );
-      docxHtml = await docxToHtmlServer(new Uint8Array(bytes));
-    } catch {
-      docxHtml = null; // fichier illisible → repli visionnage
-    }
-  }
-
   const meta = (
     <div className="flex flex-wrap items-center gap-2 mb-5">
       <BoBadge tone="orange">{DOC_KIND_LABELS[doc.kind] ?? doc.kind}</BoBadge>
@@ -120,111 +157,46 @@ export default async function DocumentEditorPage({
     </div>
   );
 
+  // ── Fichier Microsoft Office réel → lanceur Excel / Word ──
+  if ((isOfficeKind || doc.kind === "FILE") && (isExcel || isWord) && doc.filePath) {
+    const app = isExcel ? "excel" : "word";
+    const token = await signOfficeFileToken(doc.id);
+    const fileUrl = officeFilePath(doc.id, token);
+
+    return (
+      <div className="max-w-7xl mx-auto">
+        {breadcrumb}
+        <BoPageHeader
+          eyebrow={isExcel ? "Classeur Microsoft Excel" : "Document Microsoft Word"}
+          title={doc.name}
+        />
+        {meta}
+        <OfficeLauncher
+          documentId={doc.id}
+          name={doc.name}
+          app={app}
+          fileUrl={fileUrl}
+          content={doc.content}
+          size={doc.size}
+          version={doc.version}
+          updatedAt={doc.updatedAt.toISOString()}
+        />
+      </div>
+    );
+  }
+
+  // ── Autre fichier importé (PDF, image, archive…) → téléchargement ──
   return (
     <div className="max-w-7xl mx-auto">
       {breadcrumb}
-
-      {doc.kind === "SHEET" && (
-        <>
-          <BoPageHeader eyebrow="Éditeur Excel" title={doc.name} />
-          {meta}
-          <UniverSheetEditor
-            documentId={doc.id}
-            documentName={doc.name}
-            hasFile={!!doc.filePath}
-            serverVersion={doc.version}
-            fallbackLegacy={parseLegacy(doc.content)}
-          />
-        </>
-      )}
-
-      {doc.kind === "DOC" && (
-        <>
-          <BoPageHeader eyebrow="Éditeur de document" title={doc.name} />
-          {meta}
-          <DocumentEditor
-            documentId={doc.id}
-            documentName={doc.name}
-            initialContent={doc.content ?? "<p></p>"}
-          />
-        </>
-      )}
-
-      {/* Fichier Excel importé (.xlsx) → édition directe du VRAI fichier */}
-      {doc.kind === "FILE" && isXlsx(doc) && (
-        <>
-          <BoPageHeader eyebrow="Fichier Excel" title={doc.name} />
-          {meta}
-          <UniverSheetEditor
-            documentId={doc.id}
-            documentName={doc.name}
-            hasFile={!!doc.filePath}
-            serverVersion={doc.version}
-            fallbackLegacy={parseLegacy(doc.content)}
-          />
-        </>
-      )}
-
-      {/* Fichier Word importé (.docx) → édition directe du VRAI fichier */}
-      {doc.kind === "FILE" && isDocx(doc) && docxHtml !== null && (
-        <>
-          <BoPageHeader eyebrow="Fichier Word" title={doc.name} />
-          {meta}
-          <DocumentEditor
-            documentId={doc.id}
-            documentName={doc.name}
-            initialContent={docxHtml}
-            hasFile
-          />
-        </>
-      )}
-
-      {/* Fichier Word illisible ou autre format → visionnage */}
-      {doc.kind === "FILE" && !isXlsx(doc) && !(isDocx(doc) && docxHtml !== null) && (
-        <>
-          <BoPageHeader eyebrow="Fichier importé" title={doc.name} />
-          {meta}
-          <FileViewer
-            documentId={doc.id}
-            name={doc.name}
-            mimeType={doc.mimeType}
-            size={doc.size}
-          />
-        </>
-      )}
+      <BoPageHeader eyebrow="Fichier importé" title={doc.name} />
+      {meta}
+      <FileViewer
+        documentId={doc.id}
+        name={doc.name}
+        mimeType={doc.mimeType}
+        size={doc.size}
+      />
     </div>
   );
-}
-
-function isDocx(doc: { name: string; mimeType: string | null }): boolean {
-  return (
-    /\.docx$/i.test(doc.name) ||
-    !!doc.mimeType?.includes("wordprocessingml")
-  );
-}
-
-function isXlsx(doc: { name: string; mimeType: string | null }): boolean {
-  return (
-    /\.xlsx?$/i.test(doc.name) ||
-    !!doc.mimeType?.includes("spreadsheetml") ||
-    !!doc.mimeType?.includes("ms-excel")
-  );
-}
-
-function parseLegacy(content: string | null): { cols: string[]; rows: string[][] } | null {
-  if (!content) return null;
-  try {
-    const parsed = JSON.parse(content);
-    if (Array.isArray(parsed?.cols) && Array.isArray(parsed?.rows)) {
-      return {
-        cols: parsed.cols.map((c: unknown) => String(c ?? "")),
-        rows: parsed.rows.map((r: unknown[]) =>
-          Array.isArray(r) ? r.map((c) => String(c ?? "")) : []
-        ),
-      };
-    }
-  } catch {
-    // contenu illisible → pas de repli
-  }
-  return null;
 }

@@ -2,6 +2,14 @@
  * Construit l'instantané complet du back-office (toutes entités).
  * Utilisé par GET /api/back-office/snapshot ET par les layouts cabinet /
  * academy pour amorcer le moteur offline côté client.
+ *
+ * PERFORMANCE : cache mémoire court (60 s) — la base Neon distante coûte
+ * plusieurs secondes par salve de requêtes ; sans cache, CHAQUE rendu de
+ * page du cockpit paierait ce prix (clics "lents"). Le store local
+ * IndexedDB reste la source côté client (il se réconcilie de lui-même au
+ * tic de 30 s du moteur offline) ; ce cache ne sert qu’à l’amorçage.
+ * Invalidation explicite après chaque lot de mutations (données fraîches
+ * garanties là où c’est nécessaire).
  */
 
 import prisma from "@/lib/prisma";
@@ -9,7 +17,26 @@ import type { BoSnapshot } from "@/lib/offline/types";
 
 const iso = (d: Date | null | undefined): string | null => (d ? d.toISOString() : null);
 
-export async function buildBoSnapshot(): Promise<BoSnapshot> {
+const SNAPSHOT_CACHE_TTL_MS = 60_000;
+let snapshotCache: { at: number; snap: BoSnapshot } | null = null;
+
+/** Invalide le cache (après application de mutations). */
+export function invalidateBoSnapshotCache(): void {
+  snapshotCache = null;
+}
+
+export async function buildBoSnapshot(options?: {
+  fresh?: boolean;
+}): Promise<BoSnapshot> {
+  if (!options?.fresh && snapshotCache && Date.now() - snapshotCache.at < SNAPSHOT_CACHE_TTL_MS) {
+    return snapshotCache.snap;
+  }
+  const snap = await buildUncached();
+  snapshotCache = { at: Date.now(), snap };
+  return snap;
+}
+
+async function buildUncached(): Promise<BoSnapshot> {
   const [clients, folders, workItems, documents, submissions, formations, articles, testimonials] =
     await Promise.all([
       prisma.client.findMany({ orderBy: { createdAt: "asc" } }),

@@ -1,6 +1,6 @@
 import Link from "next/link";
-import prisma from "@/lib/prisma";
 import { getSession } from "@/lib/auth";
+import { buildBoSnapshot } from "@/lib/back-office/snapshot";
 import {
   BoPageHeader,
   BoBadge,
@@ -34,45 +34,53 @@ export const dynamic = "force-dynamic";
 export default async function CabinetDashboardPage() {
   const session = await getSession();
 
-  const [
-    totalClients,
-    totalOng,
-    totalEntreprises,
-    totalFolders,
-    missionsEnCours,
-    missionsTerminees,
-    totalDocs,
-    newSubmissions,
-    upcoming,
-    recentSubs,
-    recentDocs,
-  ] = await Promise.all([
-    prisma.client.count({ where: { status: "ACTIF" } }),
-    prisma.client.count({ where: { type: "ONG", status: "ACTIF" } }),
-    prisma.client.count({ where: { type: "ENTREPRISE", status: "ACTIF" } }),
-    prisma.folder.count(),
-    prisma.workItem.count({ where: { status: { in: ["A_FAIRE", "EN_COURS", "EN_REVISION"] } } }),
-    prisma.workItem.count({ where: { status: "TERMINE" } }),
-    prisma.document.count({ where: { entity: "CABINET" } }),
-    prisma.submission.count({ where: { entity: "CABINET", status: "NOUVEAU" } }),
-    prisma.workItem.findMany({
-      where: { status: { not: "TERMINE" }, dueDate: { not: null } },
-      orderBy: { dueDate: "asc" },
-      take: 7,
-      include: { client: { select: { name: true, type: true } } },
-    }),
-    prisma.submission.findMany({
-      where: { entity: "CABINET" },
-      orderBy: { createdAt: "desc" },
-      take: 5,
-    }),
-    prisma.document.findMany({
-      where: { entity: "CABINET" },
-      orderBy: { updatedAt: "desc" },
-      take: 6,
-      include: { folder: { select: { id: true, name: true, clientId: true, client: { select: { name: true } } } } },
-    }),
-  ]);
+  // Données dérivées de l'instantané partagé avec le layout (cache court) :
+  // zéro requête supplémentaire en régime établi — la base Neon distante
+  // coûte ~1 s par requête, ce tableau de bord n'en ajoute AUCUNE.
+  const snap = await buildBoSnapshot();
+  const clientById = new Map(snap.clients.map((c) => [c.id, c]));
+  const folderById = new Map(snap.folders.map((f) => [f.id, f]));
+
+  const cabinetDocs = snap.documents.filter((d) => d.entity === "CABINET");
+  const cabinetSubs = snap.submissions.filter((s) => s.entity === "CABINET");
+
+  const totalClients = snap.clients.filter((c) => c.status === "ACTIF").length;
+  const totalOng = snap.clients.filter((c) => c.type === "ONG" && c.status === "ACTIF").length;
+  const totalEntreprises = snap.clients.filter((c) => c.type === "ENTREPRISE" && c.status === "ACTIF").length;
+  const totalFolders = snap.folders.length;
+  const missionsEnCours = snap.workItems.filter((w) =>
+    ["A_FAIRE", "EN_COURS", "EN_REVISION"].includes(w.status)
+  ).length;
+  const missionsTerminees = snap.workItems.filter((w) => w.status === "TERMINE").length;
+  const totalDocs = cabinetDocs.length;
+  const newSubmissions = cabinetSubs.filter((s) => s.status === "NOUVEAU").length;
+
+  const upcoming = snap.workItems
+    .filter((w) => w.status !== "TERMINE" && w.dueDate)
+    .sort((a, b) => String(a.dueDate).localeCompare(String(b.dueDate)))
+    .slice(0, 7)
+    .map((w) => ({
+      ...w,
+      dueDate: w.dueDate ? new Date(w.dueDate) : null,
+      client: clientById.get(w.clientId) ?? { type: "ENTREPRISE", name: "—" },
+    }));
+
+  const recentSubs = cabinetSubs.slice(0, 5);
+  const recentDocs = cabinetDocs.slice(0, 6).map((d) => {
+    const folder = d.folderId ? folderById.get(d.folderId) : undefined;
+    return {
+      id: d.id,
+      name: d.name,
+      kind: d.kind,
+      folder: folder
+        ? {
+            id: folder.id,
+            name: folder.name,
+            client: clientById.get(folder.clientId) ?? { name: "—" },
+          }
+        : null,
+    };
+  });
 
   const now = new Date();
   const lateCount = upcoming.filter((w) => w.dueDate && w.dueDate < now).length;

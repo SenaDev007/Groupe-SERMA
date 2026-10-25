@@ -1597,8 +1597,9 @@ function CreateFileDialog({
             Créer un fichier dans ce dossier
           </DialogTitle>
           <DialogDescription>
-            Tableur compatible Excel &amp; Google Sheets, ou document compatible
-            Word &amp; Google Docs — éditables directement dans le cockpit.
+            Vrai classeur Microsoft Excel (.xlsx) ou vrai document Microsoft
+            Word (.docx), créé au format Office et ouvert dans Microsoft
+            Excel / Word avec toutes leurs fonctionnalités.
           </DialogDescription>
         </DialogHeader>
 
@@ -1625,8 +1626,8 @@ function CreateFileDialog({
 
           <div className="grid grid-cols-2 gap-3">
             {[
-              { value: "SHEET", label: "Tableur", desc: "Excel / Sheets", icon: FileSpreadsheet },
-              { value: "DOC", label: "Document", desc: "Word / Docs", icon: FileText },
+              { value: "SHEET", label: "Tableur Excel", desc: "Classeur .xlsx", icon: FileSpreadsheet },
+              { value: "DOC", label: "Document Word", desc: "Document .docx", icon: FileText },
             ].map((option) => {
               const Icon = option.icon;
               const active = kind === option.value;
@@ -1747,7 +1748,8 @@ function ImportFileDialog({
     try {
       // Le fichier est conservé localement (IndexedDB) : l'import fonctionne
       // même hors-ligne ; le téléversement vers le serveur se fera à la
-      // synchronisation et le contenu Excel sera converti alors.
+      // synchronisation (le vrai fichier .xlsx / .docx est alors archivé
+      // et ouvrable dans Microsoft Excel / Word).
       const blobKey = boEngine.newId("blob");
       await blobPut(blobKey, f);
       await boEngine.mutate({
@@ -1782,7 +1784,9 @@ function ImportFileDialog({
           </DialogTitle>
           <DialogDescription>
             Excel (.xlsx), Word (.docx), PDF ou tout autre fichier professionnel.
-            Les fichiers Excel sont automatiquement convertis pour l&apos;édition dans le cockpit.
+            Les fichiers Excel et Word s&apos;ouvrent dans Microsoft Office
+            (bouton « Ouvrir dans l&apos;application ») avec l&apos;intégralité de
+            leurs fonctionnalités.
           </DialogDescription>
         </DialogHeader>
 

@@ -1,4 +1,4 @@
-import prisma from "@/lib/prisma";
+import { buildBoSnapshot } from "@/lib/back-office/snapshot";
 import { BoPageHeader } from "@/components/back-office/BoKit";
 import { ClientsView } from "@/components/back-office/ClientsView";
 import type { ClientRow } from "@/lib/back-office/derive";
@@ -19,33 +19,31 @@ export default async function ClientsPage({
   const { tab } = await searchParams;
   const initialTab = tab === "ENTREPRISE" ? "ENTREPRISE" : "ONG";
 
-  const [clients, folders, activeMissions, documents] = await Promise.all([
-    prisma.client.findMany({ orderBy: { createdAt: "asc" } }),
-    prisma.folder.findMany({ select: { id: true, clientId: true } }),
-    prisma.workItem.groupBy({
-      by: ["clientId"],
-      where: { status: { not: "TERMINE" } },
-      _count: { _all: true },
-    }),
-    prisma.document.findMany({ select: { folderId: true } }),
-  ]);
+  // Données dérivées de l'instantané partagé avec le layout (cache court) :
+  // zéro requête supplémentaire — la base Neon distante coûte ~1 s par
+  // requête, ce portefeuille n'en ajoute AUCUNE.
+  const snap = await buildBoSnapshot();
 
   const foldersByClient = new Map<string, number>();
-  for (const f of folders) {
+  for (const f of snap.folders) {
     foldersByClient.set(f.clientId, (foldersByClient.get(f.clientId) ?? 0) + 1);
   }
-  const missionMap = new Map(activeMissions.map((m) => [m.clientId, m._count._all]));
+  const missionMap = new Map<string, number>();
+  for (const w of snap.workItems) {
+    if (w.status === "TERMINE") continue;
+    missionMap.set(w.clientId, (missionMap.get(w.clientId) ?? 0) + 1);
+  }
 
   // Nombre de fichiers par client via l'appartenance des dossiers
-  const folderClient = new Map(folders.map((f) => [f.id, f.clientId] as const));
+  const folderClient = new Map(snap.folders.map((f) => [f.id, f.clientId] as const));
   const docsByClient = new Map<string, number>();
-  for (const d of documents) {
+  for (const d of snap.documents) {
     const cid = d.folderId ? folderClient.get(d.folderId) : undefined;
     if (!cid) continue;
     docsByClient.set(cid, (docsByClient.get(cid) ?? 0) + 1);
   }
 
-  const rows: ClientRow[] = clients.map((c) => ({
+  const rows: ClientRow[] = snap.clients.map((c) => ({
     id: c.id,
     type: c.type,
     name: c.name,
@@ -57,7 +55,7 @@ export default async function ClientsPage({
     taxId: c.taxId,
     status: c.status,
     notes: c.notes,
-    createdAt: c.createdAt.toISOString(),
+    createdAt: c.createdAt,
     foldersCount: foldersByClient.get(c.id) ?? 0,
     documentsCount: docsByClient.get(c.id) ?? 0,
     activeMissions: missionMap.get(c.id) ?? 0,
