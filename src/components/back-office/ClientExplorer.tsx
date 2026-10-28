@@ -1738,8 +1738,8 @@ function ImportFileDialog({
       setError("Sélectionnez un fichier à importer.");
       return;
     }
-    if (f.size > 20 * 1024 * 1024) {
-      setError("Fichier trop volumineux (20 Mo maximum).");
+    if (f.size > 3 * 1024 * 1024) {
+      setError("Fichier trop volumineux (3 Mo maximum).");
       return;
     }
     setPending(true);
@@ -1797,7 +1797,7 @@ function ImportFileDialog({
           className="space-y-4"
         >
           <div className="space-y-2">
-            <Label htmlFor="i-file">Fichier (20 Mo max) *</Label>
+            <Label htmlFor="i-file">Fichier (3 Mo max) *</Label>
             <div className="rounded-xl border-2 border-dashed border-marine-profond/15 p-5 text-center hover:border-orange-logo/50 transition-colors">
               <input
                 id="i-file"

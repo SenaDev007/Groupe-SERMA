@@ -93,6 +93,17 @@ model Document {
   workItem     WorkItem?   @relation(fields: [workItemId], references: [id], onDelete: SetNull)
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
+  file         BoFile? // octets de repli (serverless sans disque : Vercel)
+}
+
+// Octets des fichiers lorsque le disque n'est PAS inscriptible (fonctions
+// serverless Vercel en lecture seule). `filePath` du document reste le
+// drapeau « a un fichier » ; cette table ne sort JAMAIS dans les snapshots.
+model BoFile {
+  documentId String   @id
+  data       Bytes // contenu binaire du fichier (bytea PostgreSQL)
+  createdAt  DateTime @default(now())
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
 }
 
 // ─────────────────────────────────────────────────────────────

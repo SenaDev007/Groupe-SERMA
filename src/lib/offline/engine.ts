@@ -318,26 +318,61 @@ class BoEngine {
         outgoing.push({ id: e.id, type: e.type, createdAt: e.createdAt, payload: e.payload, fileBase64 });
       }
 
-      const res = await fetch("/api/back-office/mutations", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mutations: outgoing }),
-      });
-
-      if (res.status === 401) {
-        if (this.state.snapshot) this.emit({ authRequired: true });
-        return;
+      // Vercel limite le corps des requêtes (~4,5 Mo) : les mutations sont
+      // envoyées en LOTS pour ne jamais dépasser le plafond — un fichier de
+      // 3 Mo fait ~4 Mo de base64 ; deux imports en attente dépasseraient
+      // sinon la limite et resteraient bloqués silencieusement.
+      const MAX_BODY_CHARS = 3_800_000;
+      const chunks: typeof outgoing[] = [];
+      let batch: typeof outgoing = [];
+      let batchSize = 0;
+      for (const o of outgoing) {
+        const size = (o.fileBase64?.length ?? 0) + 1024;
+        if (batch.length > 0 && batchSize + size > MAX_BODY_CHARS) {
+          chunks.push(batch);
+          batch = [];
+          batchSize = 0;
+        }
+        batch.push(o);
+        batchSize += size;
       }
-      if (!res.ok) return; // erreur serveur transitoire → rechec au prochain tic
+      if (batch.length > 0) chunks.push(batch);
 
-      const data = (await res.json()) as {
-        results: { id: string; ok: boolean; error?: string; transient?: boolean }[];
+      const allResults: {
+        id: string;
+        ok: boolean;
+        error?: string;
+        transient?: boolean;
+      }[] = [];
+      let last: {
         serverTime: string;
         snapshot: BoSnapshot;
-      };
+      } | null = null;
+      for (const chunk of chunks) {
+        const res = await fetch("/api/back-office/mutations", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mutations: chunk }),
+        });
+
+        if (res.status === 401) {
+          if (this.state.snapshot) this.emit({ authRequired: true });
+          return;
+        }
+        if (!res.ok) break; // erreur serveur transitoire → rechec au prochain tic
+
+        const data = (await res.json()) as {
+          results: { id: string; ok: boolean; error?: string; transient?: boolean }[];
+          serverTime: string;
+          snapshot: BoSnapshot;
+        };
+        allResults.push(...data.results);
+        last = data;
+      }
+      if (!last) return; // aucun lot n'est passé → rejeu au prochain tic
 
       // Acquittements
-      for (const r of data.results) {
+      for (const r of allResults) {
         const entry = entries.find((e) => e.id === r.id);
         if (!entry) continue;
         if (r.ok) {
@@ -370,7 +405,7 @@ class BoEngine {
       }
 
       // Réconciliation : vérité serveur + mutations locales restantes
-      let snap = data.snapshot;
+      let snap = last.snapshot;
       const remaining = (await outboxAll()).sort((a, b) =>
         a.createdAt.localeCompare(b.createdAt)
       );
@@ -382,14 +417,14 @@ class BoEngine {
           payload: e.payload,
         } as BoMutation);
       }
-      this.pulledAt = data.serverTime;
+      this.pulledAt = last.serverTime;
       await kvSet(SNAPSHOT_KEY, snap);
-      await kvSet(META_KEY, { pulledAt: data.serverTime });
+      await kvSet(META_KEY, { pulledAt: last.serverTime });
 
       const after = await outboxAll();
       this.emit({
         snapshot: snap,
-        lastSyncAt: data.serverTime,
+        lastSyncAt: last.serverTime,
         pending: after.filter((e) => e.status === "PENDING").length,
         failed: after.filter((e) => e.status === "FAILED").length,
         failedErrors: after

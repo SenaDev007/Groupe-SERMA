@@ -4,32 +4,14 @@ import { getSession } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { buildBoSnapshot, invalidateBoSnapshotCache } from "@/lib/back-office/snapshot";
 import { generateSheetXlsxBytes, generateDocxBytes } from "@/lib/office/generate";
-import fs from "fs/promises";
-import fsSync from "fs";
-import path from "path";
-import { randomUUID } from "crypto";
+import {
+  boFileExists,
+  removeBoFile,
+  saveBoFileBytes,
+  writeBoFile,
+} from "@/lib/office/storage";
 
 export const dynamic = "force-dynamic";
-
-/** Répertoire des fichiers : fonctionne quel que soit le répertoire de
- *  travail (dev, build standalone lancé depuis la racine du projet…). */
-function resolveUploadDir(): string {
-  const candidates = [
-    process.env.BO_UPLOAD_DIR,
-    path.join(process.cwd(), "upload", "bo-files"),
-    path.join(process.cwd(), "..", "upload", "bo-files"),
-    path.join(process.cwd(), "../..", "upload", "bo-files"),
-  ].filter((p): p is string => !!p);
-  for (const c of candidates) {
-    try {
-      if (fsSync.existsSync(c)) return c;
-    } catch {
-      /* continuer */
-    }
-  }
-  return candidates[0] ?? path.join(process.cwd(), "upload", "bo-files");
-}
-const UPLOAD_DIR = resolveUploadDir();
 
 interface IncomingMutation {
   id: string;
@@ -133,20 +115,16 @@ async function folderDescendantIds(folderId: string): Promise<string[]> {
   return [...dead];
 }
 
-/** Supprime du disque les fichiers importés contenus dans des dossiers. */
+/** Supprime les fichiers importés contenus dans des dossiers :
+ *  disque ET base (silencieux). */
 async function unlinkFolderFiles(folderIds: string[]): Promise<void> {
   if (folderIds.length === 0) return;
   const docs = await prisma.document.findMany({
     where: { folderId: { in: folderIds }, filePath: { not: null } },
-    select: { filePath: true },
+    select: { id: true, filePath: true },
   });
   for (const d of docs) {
-    if (!d.filePath) continue;
-    try {
-      await fs.unlink(path.join(UPLOAD_DIR, path.basename(d.filePath)));
-    } catch {
-      // fichier déjà absent
-    }
+    await removeBoFile(d.id, d.filePath);
   }
 }
 
@@ -309,6 +287,7 @@ async function applyMutation(m: IncomingMutation): Promise<void> {
       // Le fichier s'ouvre ensuite dans Microsoft Excel / Word avec
       // l'intégralité des fonctionnalités du produit Office.
       let filePath: string | undefined;
+      let fileData: Uint8Array | undefined;
       let displayName = name;
       let mimeType: string | undefined;
       let size: number | undefined;
@@ -322,10 +301,11 @@ async function applyMutation(m: IncomingMutation): Promise<void> {
           const bytes = isSheet
             ? await generateSheetXlsxBytes(displayName, content)
             : await generateDocxBytes(displayName, content);
-          const storedName = `${randomUUID()}-${displayName.replace(/[\/\\\0]/g, "_")}`;
-          await fs.mkdir(UPLOAD_DIR, { recursive: true });
-          await fs.writeFile(path.join(UPLOAD_DIR, storedName), bytes);
-          filePath = storedName;
+          // Disque si possible, sinon octets en base (Vercel : FS en
+          // lecture seule) — c'est ce qui réparait document.import.
+          const stored = await writeBoFile(bytes, displayName);
+          filePath = stored.filePath;
+          fileData = stored.fileData;
           mimeType = isSheet
             ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             : "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
@@ -350,6 +330,9 @@ async function applyMutation(m: IncomingMutation): Promise<void> {
           ...(size !== undefined ? { size } : {}),
         },
       });
+      // Stockage base (serverless sans disque) APRÈS la création de la
+      // ligne : un échec ici laisse un document régénérable (ensureOfficeFile).
+      if (fileData) await saveBoFileBytes(s(p.id), fileData);
       return;
     }
 
@@ -359,12 +342,18 @@ async function applyMutation(m: IncomingMutation): Promise<void> {
       if (!existing) throw new Error("Document introuvable.");
 
       // Fichier réel joint à la sauvegarde (.xlsx tableur ou .docx document
-      // Word) → écrit sur le disque et référencé par le document (vrai
-      // fichier Microsoft téléchargeable, extension selon le type MIME).
+      // Word) → stocké (disque, sinon base) et référencé par le document
+      // (vrai fichier Microsoft téléchargeable, extension selon le type MIME).
       let filePath: string | undefined;
+      let fileData: Uint8Array | undefined;
       let size: number | undefined;
       let mimeType: string | undefined;
       if (m.fileBase64) {
+        // Vercel limite le corps des requêtes (~4,5 Mo) : la synchronisation
+        // hors-ligne via base64 est plafonnée à 3 Mo de fichier.
+        if (m.fileBase64.length > 4_200_000) {
+          throw new Error("Fichier trop volumineux pour la synchronisation en ligne (3 Mo maximum).");
+        }
         const buffer = Buffer.from(m.fileBase64, "base64");
         if (buffer.length > 20 * 1024 * 1024) {
           throw new Error("Fichier trop volumineux (20 Mo maximum).");
@@ -380,16 +369,16 @@ async function applyMutation(m: IncomingMutation): Promise<void> {
             ? displayName
             : `${displayName}${ext}`
           : displayName;
-        const storedName = `${randomUUID()}-${safeName}`;
-        await fs.mkdir(UPLOAD_DIR, { recursive: true });
-        await fs.writeFile(path.join(UPLOAD_DIR, storedName), buffer);
+        // Disque si possible, sinon octets en base (Vercel : FS en lecture
+        // seule) — l'aller-retour « télécharger / modifier / renvoyer »
+        // fonctionne désormais partout.
+        const stored = await writeBoFile(buffer, safeName);
         // L'ancien fichier devient orphelin → nettoyage silencieux
         if (existing.filePath) {
-          await fs
-            .unlink(path.join(UPLOAD_DIR, path.basename(existing.filePath)))
-            .catch(() => {});
+          await removeBoFile(id, existing.filePath);
         }
-        filePath = storedName;
+        filePath = stored.filePath;
+        fileData = stored.fileData;
         size = buffer.length;
         mimeType =
           declaredMime ||
@@ -407,6 +396,7 @@ async function applyMutation(m: IncomingMutation): Promise<void> {
           ...(mimeType ? { mimeType } : {}),
         },
       });
+      if (fileData) await saveBoFileBytes(id, fileData);
       return;
     }
 
@@ -432,26 +422,29 @@ async function applyMutation(m: IncomingMutation): Promise<void> {
     case "document.delete": {
       const id = s(p.id);
       const doc = await prisma.document.findUnique({ where: { id } });
-      if (doc?.filePath) {
-        try {
-          await fs.unlink(path.join(UPLOAD_DIR, path.basename(doc.filePath)));
-        } catch {
-          // fichier déjà absent
-        }
-      }
+      // Fichier supprimé du disque ET de la base (silencieux)
+      if (doc) await removeBoFile(id, doc.filePath);
       await prisma.document.delete({ where: { id } });
       return;
     }
 
     case "document.import": {
       const id = s(p.id);
-      // Idempotence : déjà téléversé lors d'un rejeu précédent
+      // Idempotence : déjà téléversé lors d'un rejeu précédent — le fichier
+      // existe sur le disque OU est archivé en base (BoFile).
       const already = await prisma.document.findUnique({ where: { id } });
-      if (already?.filePath) return;
+      if (already?.filePath && (await boFileExists(id, already.filePath))) {
+        return;
+      }
 
       const name = s(p.name);
       if (!name) throw new Error("Nom de fichier manquant.");
       if (!m.fileBase64) throw new Error("Contenu du fichier manquant (import hors-ligne).");
+      // Vercel limite le corps des requêtes (~4,5 Mo) : la synchronisation
+      // hors-ligne via base64 est plafonnée à 3 Mo de fichier.
+      if (m.fileBase64.length > 4_200_000) {
+        throw new Error("Fichier trop volumineux pour la synchronisation en ligne (3 Mo maximum).");
+      }
       const buffer = Buffer.from(m.fileBase64, "base64");
       if (buffer.length > 20 * 1024 * 1024) throw new Error("Fichier trop volumineux (20 Mo maximum).");
 
@@ -462,36 +455,59 @@ async function applyMutation(m: IncomingMutation): Promise<void> {
       }
 
       const safeName = name.replace(/[\/\\\0]/g, "_");
-      const storedName = `${randomUUID()}-${safeName}`;
-      await fs.mkdir(UPLOAD_DIR, { recursive: true });
-      await fs.writeFile(path.join(UPLOAD_DIR, storedName), buffer);
+      // Disque si possible (dev / serveur du cabinet), sinon octets en base
+      // (Vercel : FS en lecture seule). C'est CE repli qui réparait
+      // définitivement l'échec « Échec de l'application (document.import) »
+      // en production : fs.mkdir y échouait systématiquement.
+      const stored = await writeBoFile(buffer, safeName);
 
       const ext = safeName.split(".").pop()?.toLowerCase() || "";
       const mimeType = s(p.mimeType) || "application/octet-stream";
 
       try {
-        await prisma.document.create({
-          data: {
-            id,
-            name: safeName,
-            kind: "FILE",
-            entity: "CABINET",
-            mimeType,
-            size: buffer.length,
-            filePath: storedName,
-            source: "IMPORT",
-            folderId,
-          },
-        });
+        if (already) {
+          // Document créé par une tentative antérieure partiellement
+          // appliquée (fichier perdu, coupure…) : on ATTACHE le fichier au
+          // document existant — un create heurterait la clé primaire et
+          // serait masqué en « OK » par l'idempotence P2002, laissant le
+          // fichier définitivement perdu.
+          await prisma.document.update({
+            where: { id },
+            data: {
+              name: safeName,
+              kind: "FILE",
+              entity: "CABINET",
+              mimeType,
+              size: buffer.length,
+              filePath: stored.filePath,
+              source: "IMPORT",
+              folderId,
+            },
+          });
+        } else {
+          await prisma.document.create({
+            data: {
+              id,
+              name: safeName,
+              kind: "FILE",
+              entity: "CABINET",
+              mimeType,
+              size: buffer.length,
+              filePath: stored.filePath,
+              source: "IMPORT",
+              folderId,
+            },
+          });
+        }
       } catch (err) {
         // Fichier écrit sur le disque mais enregistrement en base impossible
         // (coupure PostgreSQL…) → on supprime le fichier pour ne pas laisser
         // d'orphelin : le rejeu de la mutation réécrira proprement.
-        await fs
-          .unlink(path.join(UPLOAD_DIR, storedName))
-          .catch(() => {});
+        await removeBoFile(id, stored.filePath);
         throw err;
       }
+      // Octets en base (serverless sans disque) après l'enregistrement.
+      if (stored.fileData) await saveBoFileBytes(id, stored.fileData);
 
       // Fichiers Excel : ouverture du contenu dans l'éditeur
       if (ext === "xlsx" || ext === "csv") {
@@ -677,7 +693,8 @@ export async function POST(req: Request) {
       e instanceof Error &&
       (e.message.includes("obligatoire") ||
         e.message.includes("manquant") ||
-        e.message.includes("introuvable"))
+        e.message.includes("introuvable") ||
+        e.message.includes("volumineux"))
     ) {
       results.push({ id: m.id, ok: false, error: e.message });
       continue;

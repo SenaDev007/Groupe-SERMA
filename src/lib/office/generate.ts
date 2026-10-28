@@ -14,19 +14,18 @@
  * Module serveur (Prisma + fs) — jamais importé côté client.
  */
 
-import fs from "fs/promises";
-import fsSync from "fs";
-import path from "path";
-import { randomUUID } from "crypto";
 import { htmlToDocxBytes, setDocxDomParser } from "@/lib/docx/convert";
+import {
+  boFileExists,
+  saveBoFileBytes,
+  writeBoFile,
+} from "@/lib/office/storage";
 import prisma from "@/lib/prisma";
 
 const XLSX_MIME =
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 const DOCX_MIME =
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-
-// Identité visuelle SERMA (marine profond + orange logo)
 const MARINE = "0C193D";
 const MARINE_MOYEN = "112046";
 const ORANGE = "E07F0A";
@@ -34,24 +33,6 @@ const GRIS = "4A4E69";
 const BORDURE = "C9CFDC";
 const LIGNE_ALT = "F4F6FB";
 const TOTAL_BG = "FDF3E3";
-
-function resolveUploadDir(): string {
-  const candidates = [
-    process.env.BO_UPLOAD_DIR,
-    path.join(process.cwd(), "upload", "bo-files"),
-    path.join(process.cwd(), "..", "upload", "bo-files"),
-    path.join(process.cwd(), "../..", "upload", "bo-files"),
-  ].filter((p): p is string => !!p);
-  for (const c of candidates) {
-    try {
-      if (fsSync.existsSync(c)) return c;
-    } catch {
-      /* continuer */
-    }
-  }
-  return candidates[0] ?? path.join(process.cwd(), "upload", "bo-files");
-}
-const UPLOAD_DIR = resolveUploadDir();
 
 function colLetter(c: number): string {
   let s = "";
@@ -273,7 +254,7 @@ function escapeHtml(s: string): string {
 }
 
 // ─────────────────────────────────────────────────────────────
-// MATERIALIZATION : document → fichier réel sur le disque
+// MATERIALIZATION : document → fichier réel (disque ou base)
 // ─────────────────────────────────────────────────────────────
 
 export interface MaterializedDocument {
@@ -308,14 +289,19 @@ export async function ensureOfficeFile(
       : await prisma.document.findUnique({ where: { id: docId } });
   if (!doc) return null;
   if (doc.filePath) {
-    return {
-      id: doc.id,
-      name: doc.name,
-      kind: doc.kind,
-      mimeType: doc.mimeType ?? guessMime(doc.kind),
-      size: doc.size ?? 0,
-      filePath: doc.filePath,
-    };
+    // Fichier déjà matérialisé : présent sur CE serveur (disque) ou archivé
+    // en base (BoFile — fichiers créés sur un déploiement sans disque).
+    // Un filePath orphelin (fichier perdu) est régénéré ci-dessous.
+    if (await boFileExists(doc.id, doc.filePath)) {
+      return {
+        id: doc.id,
+        name: doc.name,
+        kind: doc.kind,
+        mimeType: doc.mimeType ?? guessMime(doc.kind),
+        size: doc.size ?? 0,
+        filePath: doc.filePath,
+      };
+    }
   }
   if (doc.kind !== "SHEET" && doc.kind !== "DOC") return null;
 
@@ -324,21 +310,25 @@ export async function ensureOfficeFile(
     ? await generateSheetXlsxBytes(doc.name, doc.content)
     : await generateDocxBytes(doc.name, doc.content);
   const displayName = officeFileName(doc.name, isSheet ? ".xlsx" : ".docx");
-  const storedName = `${randomUUID()}-${displayName}`;
 
-  await fs.mkdir(UPLOAD_DIR, { recursive: true });
-  await fs.writeFile(path.join(UPLOAD_DIR, storedName), bytes);
+  // Disque si possible (dev / serveur du cabinet), sinon octets en base
+  // (Vercel : FS en lecture seule) — writeBoFile ne remonte jamais
+  // d'erreur d'écriture : le repli base est automatique.
+  const stored = await writeBoFile(bytes, displayName);
 
   const mimeType = isSheet ? XLSX_MIME : DOCX_MIME;
   await prisma.document.update({
     where: { id: doc.id },
     data: {
       name: displayName,
-      filePath: storedName,
+      filePath: stored.filePath,
       size: bytes.byteLength,
       mimeType,
     },
   });
+  if (stored.fileData) {
+    await saveBoFileBytes(doc.id, stored.fileData);
+  }
 
   return {
     id: doc.id,
@@ -346,7 +336,7 @@ export async function ensureOfficeFile(
     kind: doc.kind,
     mimeType,
     size: bytes.byteLength,
-    filePath: storedName,
+    filePath: stored.filePath,
   };
 }
 

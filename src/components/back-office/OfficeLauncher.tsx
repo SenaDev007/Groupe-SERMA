@@ -125,13 +125,21 @@ export function OfficeLauncher(props: OfficeLauncherProps) {
 
       // Schéma d'URI officiel Microsoft [MS-OFFURI] :
       //   ms-excel:ofe|u|https://contoso.com/classeur.xlsx
-      // L'URL du document est passée TELLE QUELLE — un encodeURIComponent
-      // complet (https%3A%2F%2F…) casse l'analyse de la commande par Office
-      // et déclenche « Office ne reconnaît pas la commande ». Seuls les
-      // espaces doivent être échappés (%20) ; or l'URL construite par le
-      // serveur (origine + chemin d'ids alphanumériques + jeton JWT
-      // base64url) ne contient que des caractères sûrs.
+      // L'URL du document est passée TELLE QUELLE (caractères réservés
+      // RFC 3986 non échappés, seuls les espaces en %20) ET doit rester
+      // sous 216 caractères (limite Excel — le jeton compact du serveur
+      // s'en charge, voir le garde-fou ci-dessous).
       const officeUri = `${protocol}:ofe|u|${absoluteUrl.replace(/ /g, "%20")}`;
+
+      // Garde-fou [MS-OFFURI] §1.7 : Excel REFUSE les commandes URI dont
+      // l'URL du document dépasse 216 caractères (« Office ne reconnaît
+      // pas la commande ») — le jeton compact (~30 car.) laisse une grande
+      // marge ; ce journal d'avertissement ne devrait donc jamais apparaître.
+      if (absoluteUrl.length > 216) {
+        console.warn(
+          `[Office] URL du document trop longue pour Excel (${absoluteUrl.length} > 216 caractères)`
+        );
+      }
 
       // iframe masqué : lance le protocole sans naviguer la page courante
       // (même mécanisme que « Ouvrir dans l'application » de OneDrive).
@@ -166,8 +174,8 @@ export function OfficeLauncher(props: OfficeLauncherProps) {
       toast.error(`Sélectionnez un fichier ${ext} (modifié dans ${appName}).`);
       return;
     }
-    if (file.size > 20 * 1024 * 1024) {
-      toast.error("Fichier trop volumineux (20 Mo maximum).");
+    if (file.size > 3 * 1024 * 1024) {
+      toast.error("Fichier trop volumineux (3 Mo maximum).");
       return;
     }
     setUploading(true);
@@ -327,7 +335,7 @@ export function OfficeLauncher(props: OfficeLauncherProps) {
               : `Mettre à jour la version (fichier ${ext})`}
           </Button>
           <span className="text-xs text-gris-texte">
-            Renvoyez le fichier enregistré depuis {appName} — 20 Mo max.
+            Renvoyez le fichier enregistré depuis {appName} — 3 Mo max.
           </span>
         </div>
       </div>

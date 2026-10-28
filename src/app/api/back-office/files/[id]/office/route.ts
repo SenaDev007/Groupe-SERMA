@@ -1,9 +1,7 @@
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { verifyOfficeFileToken } from "@/lib/office/token";
-import fs from "fs/promises";
-import fsSync from "fs";
-import path from "path";
+import { readBoFile } from "@/lib/office/storage";
 
 /**
  * GET /api/back-office/files/[id]/office?token=…
@@ -14,29 +12,12 @@ import path from "path";
  * de OneDrive / SharePoint.
  *
  * Les applications Office ne transmettant pas les cookies du navigateur,
- * l'accès est contrôlé par un jeton signé (HS256, 6 h) émis côté page
- * document pour l'utilisateur authentifié.
+ * l'accès est contrôlé par un jeton signé compact (HMAC, 6 h) émis côté
+ * page document pour l'utilisateur authentifié — compact car Excel limite
+ * l'URL des commandes URI à 216 caractères ([MS-OFFURI] §1.7).
  */
 
 export const dynamic = "force-dynamic";
-
-function resolveUploadDir(): string {
-  const candidates = [
-    process.env.BO_UPLOAD_DIR,
-    path.join(process.cwd(), "upload", "bo-files"),
-    path.join(process.cwd(), "..", "upload", "bo-files"),
-    path.join(process.cwd(), "../..", "upload", "bo-files"),
-  ].filter((p): p is string => !!p);
-  for (const c of candidates) {
-    try {
-      if (fsSync.existsSync(c)) return c;
-    } catch {
-      /* continuer */
-    }
-  }
-  return candidates[0] ?? path.join(process.cwd(), "upload", "bo-files");
-}
-const UPLOAD_DIR = resolveUploadDir();
 
 export async function GET(
   request: Request,
@@ -58,40 +39,39 @@ export async function GET(
     return NextResponse.json({ error: "Document introuvable." }, { status: 404 });
   }
 
-  // Sécurité : basename uniquement, aucun traversal possible.
-  const safePath = path.join(UPLOAD_DIR, path.basename(doc.filePath));
-
-  try {
-    const data = await fs.readFile(safePath);
-    const isWord =
-      doc.mimeType?.includes("wordprocessingml") || /\.docx?$/i.test(doc.name);
-    const contentType =
-      doc.mimeType ||
-      (isWord
-        ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-
-    return new NextResponse(new Uint8Array(data), {
-      status: 200,
-      headers: {
-        "Content-Type": contentType,
-        // « inline » : Office ouvre le document directement (pas de boîte
-        // de téléchargement) ; nom de fichier RFC 5987 pour les accents.
-        "Content-Disposition": `inline; filename="${asciiFallback(doc.name)}"; filename*=UTF-8''${encodeURIComponent(doc.name)}`,
-        "Content-Length": String(data.length),
-        "Cache-Control": "private, no-store",
-        // Office valide parfois l'existence du fichier via HEAD / OPTIONS :
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
-        "Access-Control-Expose-Headers": "Content-Disposition, Content-Length",
-      },
-    });
-  } catch {
+  // Disque local d'abord, puis octets archivés en base (Vercel : FS en
+  // lecture seule — les fichiers y vivent dans la table BoFile).
+  const data = await readBoFile(id, doc.filePath);
+  if (!data) {
     return NextResponse.json(
       { error: "Fichier physique introuvable sur le serveur." },
       { status: 404 }
     );
   }
+
+  const isWord =
+    doc.mimeType?.includes("wordprocessingml") || /\.docx?$/i.test(doc.name);
+  const contentType =
+    doc.mimeType ||
+    (isWord
+      ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+      : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+
+  return new NextResponse(new Uint8Array(data), {
+    status: 200,
+    headers: {
+      "Content-Type": contentType,
+      // « inline » : Office ouvre le document directement (pas de boîte
+      // de téléchargement) ; nom de fichier RFC 5987 pour les accents.
+      "Content-Disposition": `inline; filename="${asciiFallback(doc.name)}"; filename*=UTF-8''${encodeURIComponent(doc.name)}`,
+      "Content-Length": String(data.length),
+      "Cache-Control": "private, no-store",
+      // Office valide parfois l'existence du fichier via HEAD / OPTIONS :
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+      "Access-Control-Expose-Headers": "Content-Disposition, Content-Length",
+    },
+  });
 }
 
 /** Nom de repli ASCII (noms accentués → tirets). */

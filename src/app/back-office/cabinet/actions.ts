@@ -4,9 +4,11 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { getSession } from "@/lib/auth";
 import prisma from "@/lib/prisma";
-import fs from "fs/promises";
-import path from "path";
-import { randomUUID } from "crypto";
+import {
+  removeBoFile,
+  saveBoFileBytes,
+  writeBoFile,
+} from "@/lib/office/storage";
 
 /**
  * Server actions du cockpit Cabinet — arborescence libre de dossiers.
@@ -20,8 +22,6 @@ async function requireSession() {
   if (!session) redirect("/back-office/login");
   return session;
 }
-
-const UPLOAD_DIR = path.join(process.cwd(), "upload", "bo-files");
 
 function str(formData: FormData, key: string): string {
   return String(formData.get(key) || "").trim();
@@ -289,13 +289,8 @@ export async function deleteDocumentAction(formData: FormData): Promise<void> {
   const id = str(formData, "id");
   if (!id) return;
   const doc = await prisma.document.findUnique({ where: { id } });
-  if (doc?.filePath) {
-    try {
-      await fs.unlink(path.join(UPLOAD_DIR, path.basename(doc.filePath)));
-    } catch {
-      // fichier déjà absent
-    }
-  }
+  // Fichier supprimé du disque ET de la base (silencieux)
+  if (doc) await removeBoFile(id, doc.filePath);
   await prisma.document.delete({ where: { id } });
   revalidatePath("/back-office/cabinet/documents");
   redirect("/back-office/cabinet/documents");
@@ -321,16 +316,11 @@ export async function importFileAction(
   }
 
   const safeName = file.name.replace(/[\/\\\0]/g, "_");
-  const storedName = `${randomUUID()}-${safeName}`;
 
-  let buffer: Buffer;
-  try {
-    await fs.mkdir(UPLOAD_DIR, { recursive: true });
-    buffer = Buffer.from(await file.arrayBuffer());
-    await fs.writeFile(path.join(UPLOAD_DIR, storedName), buffer);
-  } catch {
-    return { error: "Écriture du fichier impossible sur le serveur." };
-  }
+  const buffer = Buffer.from(await file.arrayBuffer());
+  // Disque si possible, sinon octets en base (Vercel : FS en lecture
+  // seule) — même politique que la synchronisation hors-ligne.
+  const stored = await writeBoFile(buffer, safeName);
 
   const ext = safeName.split(".").pop()?.toLowerCase() || "";
 
@@ -341,11 +331,12 @@ export async function importFileAction(
       entity: "CABINET",
       mimeType: file.type || "application/octet-stream",
       size: file.size,
-      filePath: storedName,
+      filePath: stored.filePath,
       source: "IMPORT",
       folderId,
     },
   });
+  if (stored.fileData) await saveBoFileBytes(created.id, stored.fileData);
 
   // Pour les fichiers Excel importés, on ouvre aussi le contenu dans l'éditeur
   if (ext === "xlsx" || ext === "csv") {
