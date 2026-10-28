@@ -448,10 +448,21 @@ async function applyMutation(m: IncomingMutation): Promise<void> {
       const buffer = Buffer.from(m.fileBase64, "base64");
       if (buffer.length > 20 * 1024 * 1024) throw new Error("Fichier trop volumineux (20 Mo maximum).");
 
-      const folderId = optS(p.folderId);
+      let folderId = optS(p.folderId);
       if (folderId) {
         const folder = await prisma.folder.findUnique({ where: { id: folderId } });
-        if (!folder) throw new Error("Dossier de destination introuvable.");
+        if (!folder) {
+          // Dossier supprimé entre-temps (autre appareil, remise à zéro de
+          // la base…) : le fichier est quand même importé, NON RANGÉ —
+          // perdre un fichier client serait bien plus grave que de devoir
+          // le re-ranger. Un simple glisser-déposer le replace.
+          console.warn(
+            "[MUTATIONS] document.import : dossier",
+            folderId,
+            "introuvable — fichier importé non rangé"
+          );
+          folderId = undefined;
+        }
       }
 
       const safeName = name.replace(/[\/\\\0]/g, "_");

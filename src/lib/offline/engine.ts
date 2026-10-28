@@ -318,17 +318,21 @@ class BoEngine {
         outgoing.push({ id: e.id, type: e.type, createdAt: e.createdAt, payload: e.payload, fileBase64 });
       }
 
-      // Vercel limite le corps des requêtes (~4,5 Mo) : les mutations sont
-      // envoyées en LOTS pour ne jamais dépasser le plafond — un fichier de
-      // 3 Mo fait ~4 Mo de base64 ; deux imports en attente dépasseraient
-      // sinon la limite et resteraient bloqués silencieusement.
+      // Vercel limite le corps des requêtes (~4,5 Mo) ET l'API refuse les
+      // lots de plus de 200 mutations : les mutations sont envoyées en LOTS
+      // respectant les DEUX plafonds — un dossier entier importé (dossiers +
+      // fichiers) peut facilement dépasser 200 mutations d'un coup.
       const MAX_BODY_CHARS = 3_800_000;
+      const MAX_MUTATIONS_PER_BATCH = 150;
       const chunks: typeof outgoing[] = [];
       let batch: typeof outgoing = [];
       let batchSize = 0;
       for (const o of outgoing) {
         const size = (o.fileBase64?.length ?? 0) + 1024;
-        if (batch.length > 0 && batchSize + size > MAX_BODY_CHARS) {
+        if (
+          batch.length > 0 &&
+          (batchSize + size > MAX_BODY_CHARS || batch.length >= MAX_MUTATIONS_PER_BATCH)
+        ) {
           chunks.push(batch);
           batch = [];
           batchSize = 0;

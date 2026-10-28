@@ -24,6 +24,7 @@ import { boEngine } from "@/lib/offline/engine";
 import { blobPut } from "@/lib/offline/idb";
 import { folderDescendantIds, isDescendantFolder } from "@/lib/offline/mutations";
 import type { BoMutation, FolderRecord } from "@/lib/offline/types";
+import { ImportFolderDialog } from "@/components/back-office/ImportFolderDialog";
 import { childFoldersOf, folderPathSegments } from "@/lib/back-office/derive";
 import {
   NEW_FOLDER_DEFAULT_NAME,
@@ -336,6 +337,7 @@ export function ClientExplorer({
   >(null);
   const [createDialog, setCreateDialog] = useState(false);
   const [importDialog, setImportDialog] = useState(false);
+  const [folderImportDialog, setFolderImportDialog] = useState(false);
 
   function openDeleteFolder(folder: FolderRecord) {
     const dead = folderDescendantIds(folders, folder.id);
@@ -414,6 +416,14 @@ export function ClientExplorer({
         >
           <Upload className="w-4 h-4 mr-1.5" aria-hidden />
           Importer un fichier
+        </Button>
+        <Button
+          variant="outline"
+          onClick={() => setFolderImportDialog(true)}
+          className="h-9 border-marine-profond/20 text-marine-profond hover:bg-marine-profond/[0.04]"
+        >
+          <FolderInput className="w-4 h-4 mr-1.5" aria-hidden />
+          Importer un dossier
         </Button>
         <Button
           variant="outline"
@@ -679,6 +689,14 @@ export function ClientExplorer({
         open={importDialog}
         onOpenChange={setImportDialog}
         folderId={currentFolderId}
+      />
+
+      <ImportFolderDialog
+        open={folderImportDialog}
+        onOpenChange={setFolderImportDialog}
+        clientId={clientId}
+        targetFolderId={currentFolderId}
+        targetFolderName={currentFolder?.name ?? clientName}
       />
     </section>
   );
