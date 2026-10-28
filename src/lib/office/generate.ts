@@ -292,7 +292,16 @@ export async function ensureOfficeFile(
     // Fichier déjà matérialisé : présent sur CE serveur (disque) ou archivé
     // en base (BoFile — fichiers créés sur un déploiement sans disque).
     // Un filePath orphelin (fichier perdu) est régénéré ci-dessous.
-    if (await boFileExists(doc.id, doc.filePath)) {
+    // Une erreur de vérification (base momentanément indisponible) ne doit
+    // JAMAIS faire planter la page : on tient le fichier pour matérialisé —
+    // le téléchargement gère proprement un fichier réellement absent.
+    let exists: boolean;
+    try {
+      exists = await boFileExists(doc.id, doc.filePath);
+    } catch {
+      exists = true;
+    }
+    if (exists) {
       return {
         id: doc.id,
         name: doc.name,
@@ -327,7 +336,14 @@ export async function ensureOfficeFile(
     },
   });
   if (stored.fileData) {
-    await saveBoFileBytes(doc.id, stored.fileData);
+    // Archivage en base au mieux (serverless sans disque) : un échec ici
+    // ne doit pas faire échouer le RENDU de la page — la mutation de
+    // synchronisation reste, elle, en erreur tant que l'archivage rate.
+    try {
+      await saveBoFileBytes(doc.id, stored.fileData);
+    } catch (e) {
+      console.warn("[ensureOfficeFile] archivage en base impossible :", e);
+    }
   }
 
   return {

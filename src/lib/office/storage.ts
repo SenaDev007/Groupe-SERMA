@@ -2,7 +2,7 @@ import fs from "fs/promises";
 import fsSync from "fs";
 import path from "path";
 import { randomUUID } from "crypto";
-import prisma from "@/lib/prisma";
+import prisma, { resolveDatabaseUrl } from "@/lib/prisma";
 
 /**
  * STOCKAGE UNIFIÉ DES FICHIERS DU BACK-OFFICE — disque OU base PostgreSQL.
@@ -47,6 +47,58 @@ export function resolveUploadDir(): string {
 
 const UPLOAD_DIR = resolveUploadDir();
 
+// ─────────────────────────────────────────────────────────────
+// AUTORÉPARATION DU SCHÉMA PostgreSQL — table BoFile
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Garde-fou anti-« client Prisma périmé / table absente ».
+ *
+ * Le client Prisma est généré à l'installation (node_modules), or Vercel
+ * met node_modules en cache d'un build à l'autre tant que le lockfile ne
+ * change pas — un modèle ajouté au schéma sans dépendance modifiée peut
+ * donc manquer dans le client déployé (`prisma.boFile` undefined →
+ * « Échec de l'application (document.import) » sans message explicite).
+ * package.json régénère désormais le client à CHAQUE build ; cette garde
+ * crée en outre la table si elle manque réellement dans la base
+ * (db push non rejoué, branche Neu neuve…) — idempotent et sans risque.
+ */
+let boFileSchemaPromise: Promise<void> | null = null;
+
+function ensureBoFileTable(): Promise<void> {
+  if (!boFileSchemaPromise) {
+    boFileSchemaPromise = (async () => {
+      // SQLite local (dev / démo) : le schéma est poussé via db push.
+      if (resolveDatabaseUrl().startsWith("file:")) return;
+      const raw = prisma as unknown as {
+        $executeRawUnsafe: (q: string) => Promise<number>;
+      };
+      await raw.$executeRawUnsafe(`
+        CREATE TABLE IF NOT EXISTS "BoFile" (
+          "documentId" TEXT NOT NULL,
+          "data" BYTEA NOT NULL,
+          "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          CONSTRAINT "BoFile_pkey" PRIMARY KEY ("documentId")
+        )`);
+      await raw.$executeRawUnsafe(`
+        DO $do$ BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint WHERE conname = 'BoFile_documentId_fkey'
+          ) THEN
+            ALTER TABLE "BoFile" ADD CONSTRAINT "BoFile_documentId_fkey"
+            FOREIGN KEY ("documentId") REFERENCES "Document"("id")
+            ON DELETE CASCADE ON UPDATE CASCADE;
+          END IF;
+        END $do$;`);
+    })().catch((e) => {
+      // Échec (base indisponible, droits…) : recommencé au prochain appel.
+      boFileSchemaPromise = null;
+      console.warn("[BoFile] autoréparation du schéma impossible :", e);
+    });
+  }
+  return boFileSchemaPromise;
+}
+
 export interface StoredBoFile {
   /** Toujours renseigné (même en stockage base) : drapeau « a un fichier ». */
   filePath: string;
@@ -85,6 +137,7 @@ export async function saveBoFileBytes(
   documentId: string,
   bytes: Uint8Array
 ): Promise<void> {
+  await ensureBoFileTable();
   await prisma.boFile.upsert({
     where: { documentId },
     create: { documentId, data: Buffer.from(bytes) },
@@ -125,6 +178,7 @@ export async function boFileExists(
       /* continuer */
     }
   }
+  await ensureBoFileTable();
   const row = await prisma.boFile.findUnique({
     where: { documentId },
     select: { documentId: true },

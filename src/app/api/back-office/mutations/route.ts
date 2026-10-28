@@ -735,12 +735,18 @@ export async function POST(req: Request) {
       results.push({ id: m.id, ok: true });
     } else {
       // Diagnostic serveur : l'erreur complète atterrit dans dev.log,
-      // le message remonté au client nomme la mutation en cause.
+      // le message remonté au client nomme la mutation ET la cause
+      // exacte (une erreur « muette » comme un TypeError du client Prisma
+      // périmé doit rester diagnostiquable depuis l'interface).
       console.error("[MUTATIONS] Échec", m.type, e);
       results.push({
         id: m.id,
         ok: false,
-        error: message || `Échec de l'application (${m.type}).`,
+        error:
+          message ||
+          (e instanceof Error && e.message
+            ? `${e.message}`.slice(0, 200)
+            : `Échec de l'application (${m.type}).`),
       });
     }
   }
