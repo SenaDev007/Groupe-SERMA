@@ -633,7 +633,14 @@ export async function POST(req: Request) {
         // rejeu idempotent d'un create déjà appliqué (réponse réseau perdue)
         results.push({ id: m.id, ok: true });
       } else {
-        results.push({ id: m.id, ok: false, error: message || "Échec de l'application." });
+        // Diagnostic serveur : l'erreur complète atterrit dans dev.log,
+        // le message remonté au client nomme la mutation en cause.
+        console.error("[MUTATIONS] Échec", m.type, e);
+        results.push({
+          id: m.id,
+          ok: false,
+          error: message || `Échec de l'application (${m.type}).`,
+        });
       }
     }
   }

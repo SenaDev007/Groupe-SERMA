@@ -122,7 +122,16 @@ export function OfficeLauncher(props: OfficeLauncherProps) {
   function openInOffice() {
     try {
       const absoluteUrl = `${window.location.origin}${fileUrl}`;
-      const officeUri = `${protocol}:ofe|u|${encodeURIComponent(absoluteUrl)}`;
+
+      // Schéma d'URI officiel Microsoft [MS-OFFURI] :
+      //   ms-excel:ofe|u|https://contoso.com/classeur.xlsx
+      // L'URL du document est passée TELLE QUELLE — un encodeURIComponent
+      // complet (https%3A%2F%2F…) casse l'analyse de la commande par Office
+      // et déclenche « Office ne reconnaît pas la commande ». Seuls les
+      // espaces doivent être échappés (%20) ; or l'URL construite par le
+      // serveur (origine + chemin d'ids alphanumériques + jeton JWT
+      // base64url) ne contient que des caractères sûrs.
+      const officeUri = `${protocol}:ofe|u|${absoluteUrl.replace(/ /g, "%20")}`;
 
       // iframe masqué : lance le protocole sans naviguer la page courante
       // (même mécanisme que « Ouvrir dans l'application » de OneDrive).

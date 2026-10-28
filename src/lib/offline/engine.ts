@@ -270,7 +270,23 @@ class BoEngine {
     this.flushing = true;
     this.emit({ syncing: true });
     try {
-      const entries = (await outboxAll())
+      // Les échecs transitoires (erreur réseau serveur, base momentanément
+      // indisponible…) sont rejoués automatiquement — jusqu'à 5 tentatives —
+      // au lieu de rester bloquées en « échec de synchro » jusqu'à un clic
+      // manuel sur « Synchroniser ».
+      const MAX_AUTO_ATTEMPTS = 5;
+      const all = await outboxAll();
+      for (const e of all.filter(
+        (x) => x.status === "FAILED" && x.attempts < MAX_AUTO_ATTEMPTS
+      )) {
+        await outboxPut({ ...e, status: "PENDING", error: undefined });
+      }
+      const entries = all
+        .map((e) =>
+          e.status === "FAILED" && e.attempts < MAX_AUTO_ATTEMPTS
+            ? { ...e, status: "PENDING" as const, error: undefined }
+            : e
+        )
         .filter((e) => e.status === "PENDING")
         .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 
