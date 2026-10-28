@@ -43,6 +43,9 @@ interface MutationResult {
   id: string;
   ok: boolean;
   error?: string;
+  /** Échec transitoire (coupure PostgreSQL / réseau) : le client garde la
+   *  mutation en attente et la rejoue automatiquement — pas d'échec affiché. */
+  transient?: boolean;
 }
 
 function s(v: unknown): string {
@@ -57,6 +60,22 @@ function optDate(v: unknown): Date | undefined {
   if (!r) return undefined;
   const d = new Date(r);
   return isNaN(d.getTime()) ? undefined : d;
+}
+
+/**
+ * Erreurs transitoires : coupure de la connexion PostgreSQL (Neon ferme les
+ * connexions inactives — « Error in PostgreSQL connection: Closed »), timeout
+ * réseau, socket réinitialisé… Le client Prisma se reconnecte au coup
+ * suivant : un simple réessai suffit presque toujours.
+ */
+function isTransientError(e: unknown): boolean {
+  if (e instanceof Prisma.PrismaClientInitializationError) return true;
+  const msg = e instanceof Error ? e.message : String(e ?? "");
+  return (
+    /connection|closed|timed?\s*out|timeout|econnreset|econnrefused|epipe|socket|p1001|p1002|p1003|p1008|read-only/i.test(
+      msg
+    )
+  );
 }
 
 /** Nom de dossier sûr : interdit \\ / et caractères de contrôle (comme Windows). */
@@ -450,19 +469,29 @@ async function applyMutation(m: IncomingMutation): Promise<void> {
       const ext = safeName.split(".").pop()?.toLowerCase() || "";
       const mimeType = s(p.mimeType) || "application/octet-stream";
 
-      await prisma.document.create({
-        data: {
-          id,
-          name: safeName,
-          kind: "FILE",
-          entity: "CABINET",
-          mimeType,
-          size: buffer.length,
-          filePath: storedName,
-          source: "IMPORT",
-          folderId,
-        },
-      });
+      try {
+        await prisma.document.create({
+          data: {
+            id,
+            name: safeName,
+            kind: "FILE",
+            entity: "CABINET",
+            mimeType,
+            size: buffer.length,
+            filePath: storedName,
+            source: "IMPORT",
+            folderId,
+          },
+        });
+      } catch (err) {
+        // Fichier écrit sur le disque mais enregistrement en base impossible
+        // (coupure PostgreSQL…) → on supprime le fichier pour ne pas laisser
+        // d'orphelin : le rejeu de la mutation réécrira proprement.
+        await fs
+          .unlink(path.join(UPLOAD_DIR, storedName))
+          .catch(() => {});
+        throw err;
+      }
 
       // Fichiers Excel : ouverture du contenu dans l'éditeur
       if (ext === "xlsx" || ext === "csv") {
@@ -620,28 +649,71 @@ export async function POST(req: Request) {
 
   const results: MutationResult[] = [];
   for (const m of mutations) {
-    try {
-      await applyMutation(m);
+    // Application avec réessais courts : une coupure Neon momentanée ne doit
+    // jamais échouer une mutation — le client Prisma se reconnecte seul et
+    // le second essai passe (3 tentatives, 500 ms puis 1 s d'attente).
+    let ok = false;
+    let lastError: unknown = null;
+    for (let attempt = 0; attempt < 3 && !ok; attempt++) {
+      if (attempt > 0) {
+        await new Promise((r) => setTimeout(r, 500 * attempt));
+      }
+      try {
+        await applyMutation(m);
+        ok = true;
+      } catch (e) {
+        lastError = e;
+        if (!isTransientError(e)) break; // erreur définitive : ne pas réessayer
+      }
+    }
+    if (ok) {
       results.push({ id: m.id, ok: true });
-    } catch (e) {
-      if (e instanceof Error && (e.message.includes("obligatoire") || e.message.includes("manquant") || e.message.includes("introuvable"))) {
-        results.push({ id: m.id, ok: false, error: e.message });
-        continue;
-      }
-      const { replay, message } = prismaError(e);
-      if (replay) {
-        // rejeu idempotent d'un create déjà appliqué (réponse réseau perdue)
-        results.push({ id: m.id, ok: true });
-      } else {
-        // Diagnostic serveur : l'erreur complète atterrit dans dev.log,
-        // le message remonté au client nomme la mutation en cause.
-        console.error("[MUTATIONS] Échec", m.type, e);
-        results.push({
-          id: m.id,
-          ok: false,
-          error: message || `Échec de l'application (${m.type}).`,
-        });
-      }
+      continue;
+    }
+    const e = lastError as unknown;
+
+    // Erreurs de validation (message métier explicite) → échec définitif
+    if (
+      e instanceof Error &&
+      (e.message.includes("obligatoire") ||
+        e.message.includes("manquant") ||
+        e.message.includes("introuvable"))
+    ) {
+      results.push({ id: m.id, ok: false, error: e.message });
+      continue;
+    }
+
+    // Toujours transitoire après 3 tentatives → rejeu automatique côté
+    // client (la mutation reste « en attente », aucun échec n'est affiché).
+    if (isTransientError(e)) {
+      console.warn(
+        "[MUTATIONS] Transitoire après réessais",
+        m.type,
+        e instanceof Error ? e.message : e
+      );
+      results.push({
+        id: m.id,
+        ok: false,
+        transient: true,
+        error:
+          "Connexion à la base momentanément indisponible — rejeu automatique.",
+      });
+      continue;
+    }
+
+    const { replay, message } = prismaError(e);
+    if (replay) {
+      // rejeu idempotent d'un create déjà appliqué (réponse réseau perdue)
+      results.push({ id: m.id, ok: true });
+    } else {
+      // Diagnostic serveur : l'erreur complète atterrit dans dev.log,
+      // le message remonté au client nomme la mutation en cause.
+      console.error("[MUTATIONS] Échec", m.type, e);
+      results.push({
+        id: m.id,
+        ok: false,
+        error: message || `Échec de l'application (${m.type}).`,
+      });
     }
   }
 

@@ -270,11 +270,13 @@ class BoEngine {
     this.flushing = true;
     this.emit({ syncing: true });
     try {
-      // Les échecs transitoires (erreur réseau serveur, base momentanément
-      // indisponible…) sont rejoués automatiquement — jusqu'à 5 tentatives —
-      // au lieu de rester bloquées en « échec de synchro » jusqu'à un clic
-      // manuel sur « Synchroniser ».
-      const MAX_AUTO_ATTEMPTS = 5;
+      // Les échecs (erreur serveur, coupure momentanée de la base…) sont
+      // rejoués automatiquement — jusqu'à 10 tentatives — au lieu de rester
+      // bloquées en « échec de synchro » jusqu'à un clic manuel sur
+      // « Synchroniser ». Les échecs transitoires signalés par le serveur
+      // (flag transient) restent quant à eux en attente sans jamais s'afficher
+      // comme échec (voir les acquittements ci-dessous).
+      const MAX_AUTO_ATTEMPTS = 10;
       const all = await outboxAll();
       for (const e of all.filter(
         (x) => x.status === "FAILED" && x.attempts < MAX_AUTO_ATTEMPTS
@@ -329,7 +331,7 @@ class BoEngine {
       if (!res.ok) return; // erreur serveur transitoire → rechec au prochain tic
 
       const data = (await res.json()) as {
-        results: { id: string; ok: boolean; error?: string }[];
+        results: { id: string; ok: boolean; error?: string; transient?: boolean }[];
         serverTime: string;
         snapshot: BoSnapshot;
       };
@@ -346,12 +348,23 @@ class BoEngine {
           if (entry.type === "document.import" && p?.blobKey) {
             await blobDelete(p.blobKey);
           }
+        } else if (r.transient && (entry.attempts ?? 0) < 20) {
+          // Échec transitoire (coupure PostgreSQL Neon / réseau) : la
+          // mutation RESTE en attente et se rejoue automatiquement au
+          // prochain tic — aucun « échec de synchro » n'est affiché à
+          // l'utilisateur tant que ce n'est pas vraiment bloqué.
+          await outboxPut({
+            ...entry,
+            status: "PENDING",
+            error: undefined,
+            attempts: (entry.attempts ?? 0) + 1,
+          });
         } else {
           await outboxPut({
             ...entry,
             status: "FAILED",
             error: r.error ?? "Erreur inconnue",
-            attempts: entry.attempts + 1,
+            attempts: (entry.attempts ?? 0) + 1,
           });
         }
       }
